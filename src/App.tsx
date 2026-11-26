@@ -7,6 +7,7 @@ import {
   IconTransfer,
   IconWallet
 } from './components/Icons';
+import { InstallPwaBanner } from './components/InstallPwaBanner';
 import { ReceiptLightboxModal } from './components/ReceiptLightboxModal';
 import { SettingsSheetModal } from './components/SettingsSheetModal';
 import {
@@ -275,6 +276,8 @@ export function App(): React.ReactElement {
 
         {/* Konten Utama */}
         <main className="flex-1 px-4 pt-4 pb-24">
+          <InstallPwaBanner />
+
           {bannerNotice && (
             <div
               role="status"
