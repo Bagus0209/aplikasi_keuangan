@@ -235,16 +235,26 @@ export function App(): React.ReactElement {
     <div className="min-h-dvh w-full flex justify-center bg-[#E4E9F0]">
       <div className="w-full max-w-[430px] min-h-dvh bg-[#F3F5F8] flex flex-col shadow-lg border-x border-[#CFD8E3]">
         {/* Header Aplikasi */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#DCE2EC] px-4 py-3 flex items-center justify-between gap-2">
-          <div>
-            <h1 className="text-base font-bold tracking-tight text-[#0B1220]">
-              [LOGO] KasPresisi
-            </h1>
-            <p className="text-[11px] font-medium text-[#475569]">
-              {cloudActive
-                ? `Sheet: ${syncConfig.spreadsheetName || 'Tersambung'}`
-                : 'Mode Lokal HP (Siap Sambung Sheet)'}
-            </p>
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#DCE2EC] px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <img
+              src="./icon-192.png"
+              alt="Logo KasPresisi"
+              width={38}
+              height={38}
+              fetchPriority="high"
+              className="h-9.5 w-9.5 rounded-xl object-cover shrink-0 border border-[#DCE2EC]"
+            />
+            <div className="min-w-0">
+              <h1 className="text-base font-bold tracking-tight text-[#0B1220] truncate">
+                KasPresisi
+              </h1>
+              <p className="text-[11px] font-medium text-[#475569] truncate">
+                {cloudActive
+                  ? `Sheet: ${syncConfig.spreadsheetName || 'Tersambung'}`
+                  : 'Mode Lokal HP (Siap Sambung Sheet)'}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5">
