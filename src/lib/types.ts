@@ -1,5 +1,15 @@
 export type AccountType = 'bank' | 'ewallet' | 'cash';
 
+export type AccountColorTheme =
+  | 'sage'
+  | 'cream'
+  | 'sky'
+  | 'mint'
+  | 'cyan'
+  | 'sand';
+
+export type AccountEmblemKind = 'bag' | 'card' | 'ewallet';
+
 export interface Account {
   id: string;
   name: string;
@@ -10,6 +20,8 @@ export interface Account {
   balance: number;
   createdAt: string;
   isSimulation?: boolean;
+  colorTheme?: AccountColorTheme;
+  emblem?: AccountEmblemKind;
 }
 
 export type TransactionKind = 'income' | 'expense';

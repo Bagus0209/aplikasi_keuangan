@@ -1,6 +1,8 @@
 import { getMondayOfWeek, getNowTime, getTodayIso, shiftIsoDate } from './format';
 import type {
   Account,
+  AccountColorTheme,
+  AccountEmblemKind,
   AccountType,
   LedgerState,
   PeriodFilter,
@@ -15,6 +17,8 @@ export interface NewAccountInput {
   maskedNumber: string;
   roleTag: string;
   initialBalance: number;
+  colorTheme?: AccountColorTheme;
+  emblem?: AccountEmblemKind;
 }
 
 export interface NewTransactionInput {
@@ -107,7 +111,9 @@ export function applyAddAccount(state: LedgerState, input: NewAccountInput, cust
     roleTag: input.roleTag.trim() || 'Rekening Aktif',
     initialBalance,
     balance: initialBalance,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    colorTheme: input.colorTheme,
+    emblem: input.emblem
   };
 
   return {
@@ -499,38 +505,44 @@ export function createSimulationDataset(today = getTodayIso()): LedgerState {
 
   const accBca: Account = {
     id: 'sim_bca',
-    name: 'BCA Tahapan [SIMULASI]',
+    name: 'Rekening Utama BCA [SIMULASI]',
     type: 'bank',
     maskedNumber: 'Bank BCA • •••• 4821',
-    roleTag: 'Gaji & Tabungan',
+    roleTag: 'Rekening Utama',
     initialBalance: 12_000_000,
     balance: 12_165_000,
     createdAt: new Date().toISOString(),
-    isSimulation: true
+    isSimulation: true,
+    colorTheme: 'sage',
+    emblem: 'bag'
   };
 
   const accMandiri: Account = {
     id: 'sim_mandiri',
-    name: 'Mandiri Operasional [SIMULASI]',
+    name: 'Tabungan Mandiri [SIMULASI]',
     type: 'bank',
     maskedNumber: 'Bank Mandiri • •••• 9104',
-    roleTag: 'Belanja Rutin',
+    roleTag: 'Dana Operasional',
     initialBalance: 3_400_000,
     balance: 4_900_000,
     createdAt: new Date().toISOString(),
-    isSimulation: true
+    isSimulation: true,
+    colorTheme: 'cream',
+    emblem: 'bag'
   };
 
   const accCash: Account = {
     id: 'sim_cash',
-    name: 'Kas Tunai & QRIS [SIMULASI]',
+    name: 'Kas Harian & QRIS [SIMULASI]',
     type: 'cash',
     maskedNumber: 'Dompet Harian',
-    roleTag: 'Pengeluaran Kecil',
+    roleTag: 'Pengeluaran Harian',
     initialBalance: 1_475_000,
     balance: 1_250_000,
     createdAt: new Date().toISOString(),
-    isSimulation: true
+    isSimulation: true,
+    colorTheme: 'sky',
+    emblem: 'bag'
   };
 
   const transactions: Transaction[] = [

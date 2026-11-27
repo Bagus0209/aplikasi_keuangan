@@ -44,6 +44,7 @@ export function App(): React.ReactElement {
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(() => loadSyncConfig());
 
   const [preselectedAccountId, setPreselectedAccountId] = useState<string | undefined>();
+  const [preselectedTransferFromId, setPreselectedTransferFromId] = useState<string | undefined>();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -233,23 +234,23 @@ export function App(): React.ReactElement {
 
   return (
     <div className="min-h-dvh w-full flex justify-center bg-[#E4E9F0]">
-      <div className="w-full max-w-[430px] min-h-dvh bg-[#F3F5F8] flex flex-col shadow-lg border-x border-[#CFD8E3]">
+      <div className="w-full max-w-[430px] min-h-dvh bg-[#FAFAFB] flex flex-col shadow-lg border-x border-[#CFD8E3]">
         {/* Header Aplikasi */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#DCE2EC] px-4 py-2.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#EEF0F4] px-4 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <img
               src="./icon-192.png"
               alt="Logo KasPresisi"
-              width={38}
-              height={38}
+              width={32}
+              height={32}
               fetchPriority="high"
-              className="h-9.5 w-9.5 rounded-xl object-cover shrink-0 border border-[#DCE2EC]"
+              className="h-8 w-8 rounded-lg object-cover shrink-0 border border-[#DCE2EC]"
             />
             <div className="min-w-0">
-              <h1 className="text-base font-bold tracking-tight text-[#0B1220] truncate">
+              <h1 className="text-sm font-bold tracking-tight text-[#0B1220] truncate">
                 KasPresisi
               </h1>
-              <p className="text-[11px] font-medium text-[#475569] truncate">
+              <p className="text-[10px] font-medium text-[#475569] truncate">
                 {cloudActive
                   ? `Sheet: ${syncConfig.spreadsheetName || 'Tersambung'}`
                   : 'Mode Lokal HP (Siap Sambung Sheet)'}
@@ -324,6 +325,11 @@ export function App(): React.ReactElement {
                 setPreselectedAccountId(accId);
                 setActiveTab('record');
               }}
+              onQuickTransferFromAccount={(accId) => {
+                setPreselectedTransferFromId(accId);
+                setActiveTab('transfer');
+              }}
+              onOpenReport={() => setActiveTab('report')}
               onLoadSimulation={() => setLedger(createSimulationDataset())}
               onOpenSettings={() => setIsSettingsOpen(true)}
             />
@@ -355,6 +361,7 @@ export function App(): React.ReactElement {
             <TransferView
               accounts={ledger.accounts}
               transfers={ledger.transfers}
+              preselectedFromId={preselectedTransferFromId}
               isBusy={isBusy}
               onSaveTransfer={handleSaveTransfer}
               onGoToAddAccount={() => setActiveTab('accounts')}

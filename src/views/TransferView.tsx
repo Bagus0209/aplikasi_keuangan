@@ -12,6 +12,7 @@ import type { Account, Transfer } from '../lib/types';
 interface TransferViewProps {
   accounts: Account[];
   transfers: Transfer[];
+  preselectedFromId?: string;
   isBusy: boolean;
   onSaveTransfer: (input: NewTransferInput) => Promise<void>;
   onGoToAddAccount: () => void;
@@ -26,11 +27,12 @@ const FEE_PRESETS = [
 export function TransferView({
   accounts,
   transfers,
+  preselectedFromId,
   isBusy,
   onSaveTransfer,
   onGoToAddAccount
 }: TransferViewProps): React.ReactElement {
-  const [fromId, setFromId] = useState<string>(accounts[0]?.id || '');
+  const [fromId, setFromId] = useState<string>(preselectedFromId || accounts[0]?.id || '');
   const [toId, setToId] = useState<string>(accounts[1]?.id || accounts[0]?.id || '');
   const [amountRaw, setAmountRaw] = useState('');
   const [adminFeeRaw, setAdminFeeRaw] = useState('0');
@@ -40,13 +42,19 @@ export function TransferView({
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    if (!accounts.some((a) => a.id === fromId) && accounts[0]) {
+    if (preselectedFromId && accounts.some((a) => a.id === preselectedFromId)) {
+      setFromId(preselectedFromId);
+      if (toId === preselectedFromId) {
+        const alt = accounts.find((a) => a.id !== preselectedFromId);
+        if (alt) setToId(alt.id);
+      }
+    } else if (!accounts.some((a) => a.id === fromId) && accounts[0]) {
       setFromId(accounts[0].id);
     }
     if (!accounts.some((a) => a.id === toId)) {
       setToId(accounts[1]?.id || accounts[0]?.id || '');
     }
-  }, [accounts, fromId, toId]);
+  }, [accounts, fromId, toId, preselectedFromId]);
 
   if (accounts.length < 2) {
     return (
