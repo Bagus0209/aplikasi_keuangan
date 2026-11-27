@@ -62,12 +62,12 @@ export function SettingsSheetModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0B1220]/60 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-[#0B1220]/60 p-0 md:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-sheet-title"
     >
-      <div className="w-full max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white p-5 shadow-xl border border-[#DCE2EC]">
+      <div className="w-full md:max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-white p-5 shadow-xl border border-[#DCE2EC]">
         <div className="flex items-center justify-between gap-3 pb-3 border-b border-[#DCE2EC]">
           <div className="flex items-center gap-2">
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0F4C81] text-white">

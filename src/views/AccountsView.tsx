@@ -419,12 +419,12 @@ export function AccountsView({
       {/* Modal Tambah Rekening Baru */}
       {showAddModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0B1220]/60 p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-[#0B1220]/60 p-0 md:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="add-acc-modal-title"
         >
-          <div className="w-full max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white p-5 border border-[#DCE2EC] shadow-xl space-y-3.5">
+          <div className="w-full md:max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-white p-5 border border-[#DCE2EC] shadow-xl space-y-3.5">
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[#DCE2EC]">
               <h2 id="add-acc-modal-title" className="text-base font-bold text-[#0B1220]">
                 Tambah Rekening / Kantong Baru
@@ -612,7 +612,7 @@ export function AccountsView({
       {/* Modal Detail & Aksi Rekening saat Kartu Diklik */}
       {selectedAccount && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0B1220]/60 p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-[#0B1220]/60 p-0 md:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="detail-acc-title"
@@ -624,7 +624,7 @@ export function AccountsView({
               visualMap
             );
             return (
-              <div className="w-full max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white p-5 border border-[#DCE2EC] shadow-xl space-y-4">
+              <div className="w-full md:max-w-[430px] max-h-[92dvh] overflow-y-auto rounded-t-2xl md:rounded-2xl bg-white p-5 border border-[#DCE2EC] shadow-xl space-y-4">
                 <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[#DCE2EC]">
                   <div className="flex items-center gap-3 min-w-0">
                     <div

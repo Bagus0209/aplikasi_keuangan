@@ -102,12 +102,12 @@ export function InstallPwaBanner(): React.ReactElement | null {
 
       {showGuideModal && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0B1220]/65 p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-[#0B1220]/65 p-0 md:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="install-guide-title"
         >
-          <div className="w-full max-w-[430px] rounded-t-2xl sm:rounded-2xl bg-white p-5 border border-[#DCE2EC] space-y-3.5">
+          <div className="w-full md:max-w-[430px] rounded-t-2xl md:rounded-2xl bg-white p-5 border border-[#DCE2EC] space-y-3.5">
             <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-[#DCE2EC]">
               <h2 id="install-guide-title" className="text-base font-bold text-[#0B1220]">
                 Cara Memasang ke Layar Utama HP

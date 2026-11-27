@@ -233,10 +233,10 @@ export function App(): React.ReactElement {
   ];
 
   return (
-    <div className="min-h-dvh w-full flex justify-center bg-[#E4E9F0]">
-      <div className="w-full max-w-[430px] min-h-dvh bg-[#FAFAFB] flex flex-col shadow-lg border-x border-[#CFD8E3]">
+    <div className="min-h-dvh w-full flex justify-center bg-[#FAFAFB] md:bg-[#E4E9F0]">
+      <div className="w-full md:max-w-[430px] min-h-dvh bg-[#FAFAFB] flex flex-col md:shadow-lg md:border-x md:border-[#CFD8E3]">
         {/* Header Aplikasi */}
-        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#EEF0F4] px-4 py-2 flex items-center justify-between gap-2">
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-[#EEF0F4] px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <img
               src="./icon-192.png"
@@ -380,7 +380,7 @@ export function App(): React.ReactElement {
         {/* Navigasi Bawah 5 Tab */}
         <nav
           aria-label="Menu utama aplikasi"
-          className="fixed bottom-0 z-30 w-full max-w-[430px] bg-white border-t border-[#DCE2EC] px-2 pt-1.5 safe-bottom"
+          className="fixed bottom-0 left-0 right-0 md:left-1/2 md:right-auto md:-translate-x-1/2 z-30 w-full md:max-w-[430px] bg-white border-t border-[#DCE2EC] px-2 pt-1.5 safe-bottom"
         >
           <div className="grid grid-cols-5 gap-1">
             {navItems.map((item) => {
