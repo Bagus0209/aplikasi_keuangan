@@ -13,9 +13,7 @@ import {
 } from '../components/Icons';
 import {
   ACCOUNT_CARD_THEMES,
-  loadAccountVisualMap,
   resolveAccountVisual,
-  saveAccountVisual,
   type StoredAccountVisual
 } from '../lib/accountTheme';
 import {
@@ -42,9 +40,11 @@ interface AccountsViewProps {
   accounts: Account[];
   transactions: Transaction[];
   budgetAlerts: CategoryBudgetStatus[];
+  visualMap: Record<string, StoredAccountVisual>;
   isBusy: boolean;
   onAddAccount: (input: NewAccountInput) => Promise<void>;
   onUpdateAccount: (input: UpdateAccountInput) => Promise<void>;
+  onUpdateAccountVisual: (accountId: string, patch: StoredAccountVisual) => void;
   onDeleteAccount: (accountId: string) => Promise<void>;
   onQuickRecordForAccount: (accountId: string) => void;
   onQuickTransferFromAccount: (accountId: string) => void;
@@ -60,9 +60,11 @@ export function AccountsView({
   accounts,
   transactions,
   budgetAlerts,
+  visualMap,
   isBusy,
   onAddAccount,
   onUpdateAccount,
+  onUpdateAccountVisual,
   onDeleteAccount,
   onQuickRecordForAccount,
   onQuickTransferFromAccount,
@@ -75,10 +77,6 @@ export function AccountsView({
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [hideBalances, setHideBalances] = useState(false);
   const [showMonthlyInfo, setShowMonthlyInfo] = useState(false);
-
-  const [visualMap, setVisualMap] = useState<Record<string, StoredAccountVisual>>(() =>
-    loadAccountVisualMap()
-  );
 
   // Modal Tambah Rekening
   const [showAddModal, setShowAddModal] = useState(false);
@@ -191,8 +189,7 @@ export function AccountsView({
     accountId: string,
     patch: StoredAccountVisual
   ) => {
-    const updated = saveAccountVisual(accountId, patch);
-    setVisualMap(updated);
+    onUpdateAccountVisual(accountId, patch);
   };
 
   const startEditAccount = (acc: Account) => {

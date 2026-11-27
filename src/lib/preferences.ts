@@ -1,10 +1,25 @@
+import { loadAccountVisualMap, saveAccountVisualMap } from './accountTheme';
 import type {
+  AccountColorTheme,
+  AccountEmblemKind,
+  AccountVisualSetting,
   BudgetHealthStatus,
   CategoryBudgetStatus,
   Transaction,
   TransactionKind,
   UserPreferences
 } from './types';
+
+const VALID_THEMES = new Set<AccountColorTheme>([
+  'sage',
+  'cream',
+  'sky',
+  'mint',
+  'cyan',
+  'sand'
+]);
+
+const VALID_EMBLEMS = new Set<AccountEmblemKind>(['bag', 'card', 'ewallet']);
 
 export const DEFAULT_EXPENSE_CATEGORIES = [
   'Konsumsi & Makan',
@@ -31,8 +46,32 @@ export function createDefaultPreferences(): UserPreferences {
     customExpenseCategories: [],
     customIncomeCategories: [],
     monthlyBudgets: {},
-    budgetWarningThresholdPct: 80
+    budgetWarningThresholdPct: 80,
+    accountVisuals: {}
   };
+}
+
+export function normalizeAccountVisuals(
+  raw: unknown
+): Record<string, AccountVisualSetting> {
+  const clean: Record<string, AccountVisualSetting> = {};
+  if (!raw || typeof raw !== 'object') return clean;
+  for (const [accId, val] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(accId || '').trim();
+    if (!id || !val || typeof val !== 'object') continue;
+    const obj = val as Record<string, unknown>;
+    const entry: AccountVisualSetting = {};
+    if (typeof obj.colorTheme === 'string' && VALID_THEMES.has(obj.colorTheme as AccountColorTheme)) {
+      entry.colorTheme = obj.colorTheme as AccountColorTheme;
+    }
+    if (typeof obj.emblem === 'string' && VALID_EMBLEMS.has(obj.emblem as AccountEmblemKind)) {
+      entry.emblem = obj.emblem as AccountEmblemKind;
+    }
+    if (entry.colorTheme || entry.emblem) {
+      clean[id] = entry;
+    }
+  }
+  return clean;
 }
 
 export function normalizePreferences(raw?: Partial<UserPreferences> | null): UserPreferences {
@@ -72,26 +111,77 @@ export function normalizePreferences(raw?: Partial<UserPreferences> | null): Use
     customExpenseCategories: cleanList(raw.customExpenseCategories),
     customIncomeCategories: cleanList(raw.customIncomeCategories),
     monthlyBudgets: cleanBudgets,
-    budgetWarningThresholdPct: validThreshold
+    budgetWarningThresholdPct: validThreshold,
+    accountVisuals: normalizeAccountVisuals(raw.accountVisuals)
   };
 }
 
 export function loadUserPreferences(): UserPreferences {
+  const legacyVisuals = normalizeAccountVisuals(loadAccountVisualMap());
   try {
     const raw = localStorage.getItem(STORAGE_PREFS_KEY);
-    if (!raw) return createDefaultPreferences();
-    return normalizePreferences(JSON.parse(raw) as Partial<UserPreferences>);
+    if (!raw) {
+      return {
+        ...createDefaultPreferences(),
+        accountVisuals: legacyVisuals
+      };
+    }
+    const normalized = normalizePreferences(JSON.parse(raw) as Partial<UserPreferences>);
+    return {
+      ...normalized,
+      accountVisuals: {
+        ...legacyVisuals,
+        ...normalized.accountVisuals
+      }
+    };
   } catch {
-    return createDefaultPreferences();
+    return {
+      ...createDefaultPreferences(),
+      accountVisuals: legacyVisuals
+    };
   }
 }
 
 export function saveUserPreferences(prefs: UserPreferences): void {
   try {
     localStorage.setItem(STORAGE_PREFS_KEY, JSON.stringify(prefs));
+    saveAccountVisualMap(prefs.accountVisuals);
   } catch {
     // Abaikan jika localStorage penuh
   }
+}
+
+export function updateAccountVisualPreference(
+  prefs: UserPreferences,
+  accountId: string,
+  patch: AccountVisualSetting
+): UserPreferences {
+  const id = accountId.trim();
+  if (!id) return prefs;
+  const current = prefs.accountVisuals[id] || {};
+  return {
+    ...prefs,
+    accountVisuals: {
+      ...prefs.accountVisuals,
+      [id]: {
+        ...current,
+        ...patch
+      }
+    }
+  };
+}
+
+export function removeAccountVisualPreference(
+  prefs: UserPreferences,
+  accountId: string
+): UserPreferences {
+  if (!prefs.accountVisuals[accountId]) return prefs;
+  const nextVisuals = { ...prefs.accountVisuals };
+  delete nextVisuals[accountId];
+  return {
+    ...prefs,
+    accountVisuals: nextVisuals
+  };
 }
 
 export function getCategoriesForKind(

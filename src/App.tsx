@@ -49,9 +49,12 @@ import {
   addCustomCategory,
   computeMonthlyBudgetStatuses,
   loadUserPreferences,
-  saveUserPreferences
+  removeAccountVisualPreference,
+  saveUserPreferences,
+  updateAccountVisualPreference
 } from './lib/preferences';
 import type {
+  AccountVisualSetting,
   ActiveTab,
   LedgerState,
   PinLockConfig,
@@ -90,12 +93,15 @@ export function App(): React.ReactElement {
   );
 
   const hiddenSinceRef = useRef<number | null>(null);
+  const lastCloudSyncMsRef = useRef<number>(0);
+  const preferencesRef = useRef<UserPreferences>(preferences);
 
   useEffect(() => {
     saveLocalLedger(ledger);
   }, [ledger]);
 
   useEffect(() => {
+    preferencesRef.current = preferences;
     saveUserPreferences(preferences);
   }, [preferences]);
 
@@ -128,10 +134,30 @@ export function App(): React.ReactElement {
     setSyncError(null);
     try {
       const result = await syncFromGoogleSheet(cfg);
+      lastCloudSyncMsRef.current = Date.now();
       setLedger(result.ledger);
+
+      const localVisuals = preferencesRef.current.accountVisuals || {};
       if (result.preferences) {
-        setPreferences(result.preferences);
+        const remoteVisuals = result.preferences.accountVisuals || {};
+        const mergedVisuals = { ...localVisuals, ...remoteVisuals };
+        const mergedPrefs: UserPreferences = {
+          ...result.preferences,
+          accountVisuals: mergedVisuals
+        };
+        setPreferences(mergedPrefs);
+
+        // Jika HP ini punya warna/ikon lokal yang belum tersimpan di Google Sheet, unggah otomatis
+        const hasUnsyncedLocalVisuals = Object.keys(localVisuals).some(
+          (accId) => !remoteVisuals[accId]
+        );
+        if (hasUnsyncedLocalVisuals) {
+          void syncPreferencesToGoogleSheet(cfg, mergedPrefs);
+        }
+      } else if (Object.keys(localVisuals).length > 0) {
+        void syncPreferencesToGoogleSheet(cfg, preferencesRef.current);
       }
+
       const updatedCfg: SyncConfig = {
         ...cfg,
         spreadsheetName: result.spreadsheetName || cfg.spreadsheetName,
@@ -155,11 +181,24 @@ export function App(): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Sinkronisasi otomatis saat kembali ke aplikasi (misal pindah dari HP Android ke iPhone)
+  useEffect(() => {
+    if (!isCloudConfigured(syncConfig)) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - lastCloudSyncMsRef.current < 15_000) return;
+      void performCloudSync(syncConfig);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [syncConfig, performCloudSync]);
+
   const handleSaveAndSyncConfig = async (nextCfg: SyncConfig) => {
     setIsBusy(true);
     setSyncError(null);
     try {
       const result = await syncFromGoogleSheet(nextCfg);
+      lastCloudSyncMsRef.current = Date.now();
       setLedger(result.ledger);
       if (result.preferences) {
         setPreferences(result.preferences);
@@ -201,6 +240,11 @@ export function App(): React.ReactElement {
     handlePreferencesChange(nextPrefs);
   };
 
+  const handleUpdateAccountVisual = (accountId: string, patch: AccountVisualSetting) => {
+    const nextPrefs = updateAccountVisualPreference(preferences, accountId, patch);
+    handlePreferencesChange(nextPrefs);
+  };
+
   const handleUpdatePinConfig = (nextPin: PinLockConfig) => {
     setPinConfig(nextPin);
     savePinLockConfig(nextPin);
@@ -222,6 +266,11 @@ export function App(): React.ReactElement {
 
   const handleAddAccount = async (input: NewAccountInput) => {
     const id = `acc_${Date.now()}`;
+    const visualPatch: AccountVisualSetting | null =
+      input.colorTheme || input.emblem
+        ? { colorTheme: input.colorTheme, emblem: input.emblem }
+        : null;
+
     if (isCloudConfigured(syncConfig)) {
       setIsBusy(true);
       try {
@@ -230,11 +279,19 @@ export function App(): React.ReactElement {
           ...input
         });
         setLedger(remote);
+        if (visualPatch) {
+          const nextPrefs = updateAccountVisualPreference(preferencesRef.current, id, visualPatch);
+          setPreferences(nextPrefs);
+          void syncPreferencesToGoogleSheet(syncConfig, nextPrefs);
+        }
       } finally {
         setIsBusy(false);
       }
     } else {
       setLedger((prev) => applyAddAccount(prev, input, id));
+      if (visualPatch) {
+        setPreferences((prev) => updateAccountVisualPreference(prev, id, visualPatch));
+      }
     }
   };
 
@@ -264,11 +321,17 @@ export function App(): React.ReactElement {
           id: accountId
         });
         setLedger(remote);
+        const nextPrefs = removeAccountVisualPreference(preferencesRef.current, accountId);
+        if (nextPrefs !== preferencesRef.current) {
+          setPreferences(nextPrefs);
+          void syncPreferencesToGoogleSheet(syncConfig, nextPrefs);
+        }
       } finally {
         setIsBusy(false);
       }
     } else {
       setLedger((prev) => applyDeleteAccount(prev, accountId));
+      setPreferences((prev) => removeAccountVisualPreference(prev, accountId));
     }
   };
 
@@ -482,9 +545,11 @@ export function App(): React.ReactElement {
               accounts={ledger.accounts}
               transactions={ledger.transactions}
               budgetAlerts={budgetAlerts}
+              visualMap={preferences.accountVisuals}
               isBusy={isBusy}
               onAddAccount={handleAddAccount}
               onUpdateAccount={handleUpdateAccount}
+              onUpdateAccountVisual={handleUpdateAccountVisual}
               onDeleteAccount={handleDeleteAccount}
               onQuickRecordForAccount={(accId) => {
                 setPreselectedAccountId(accId);

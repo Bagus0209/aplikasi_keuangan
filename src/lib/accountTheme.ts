@@ -106,11 +106,23 @@ export interface StoredAccountVisual {
 
 export function loadAccountVisualMap(): Record<string, StoredAccountVisual> {
   try {
+    if (typeof localStorage === 'undefined') return {};
     const raw = localStorage.getItem(STYLES_STORAGE_KEY);
     if (!raw) return {};
     return JSON.parse(raw) as Record<string, StoredAccountVisual>;
   } catch {
     return {};
+  }
+}
+
+export function saveAccountVisualMap(
+  visualMap: Record<string, StoredAccountVisual>
+): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(STYLES_STORAGE_KEY, JSON.stringify(visualMap));
+  } catch {
+    // Abaikan jika storage terbatas
   }
 }
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { IconClose, IconLock, IconSheet, IconTarget } from './Icons';
 import { isCloudConfigured } from '../lib/api';
 import { createPinLockConfig, verifyLocalPin } from '../lib/pinLock';
+import { checkPwaUpdateNow } from '../lib/pwaUpdater';
 import type { PinLockConfig, SyncConfig } from '../lib/types';
 
 interface SettingsSheetModalProps {
@@ -42,6 +43,8 @@ export function SettingsSheetModal({
   const [scriptUrl, setScriptUrl] = useState(config.scriptUrl);
   const [secretPin, setSecretPin] = useState(config.secretPin);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [updateStatusMsg, setUpdateStatusMsg] = useState<string | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
   // State pengaturan Kunci PIN Lokal
   const [pinMode, setPinMode] = useState<PinFormMode>('idle');
@@ -475,7 +478,7 @@ export function SettingsSheetModal({
         </section>
 
         {/* Bagian 3: Kategori & Anggaran Bulanan */}
-        <section className="mt-5 pt-4 border-t border-[#DCE2EC]">
+        <section className="mt-5 pt-4 border-t border-[#DCE2EC] space-y-2">
           <button
             type="button"
             onClick={() => {
@@ -487,6 +490,32 @@ export function SettingsSheetModal({
             <IconTarget className="w-4 h-4 text-[#0F4C81]" />
             <span>Kelola Kategori Kustom & Anggaran Bulanan</span>
           </button>
+
+          <button
+            type="button"
+            disabled={isCheckingUpdate}
+            onClick={async () => {
+              setIsCheckingUpdate(true);
+              setUpdateStatusMsg(null);
+              const res = await checkPwaUpdateNow();
+              setIsCheckingUpdate(false);
+              if (res === 'updating') {
+                setUpdateStatusMsg('Pembaruan ditemukan, aplikasi sedang memuat tampilan baru...');
+              } else if (res === 'latest') {
+                setUpdateStatusMsg('Aplikasi sudah memakai versi terbaru.');
+              } else {
+                setUpdateStatusMsg('Pembaruan otomatis aktif saat dibuka lewat HTTPS / PWA.');
+              }
+            }}
+            className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-white px-3.5 py-2 text-xs font-bold text-[#0F4C81] hover:bg-[#EFF6FF] disabled:opacity-60"
+          >
+            {isCheckingUpdate ? 'Memeriksa Pembaruan...' : 'Cek Pembaruan Tampilan Aplikasi'}
+          </button>
+          {updateStatusMsg && (
+            <p role="status" className="text-[11px] font-semibold text-[#0D6848] px-1">
+              {updateStatusMsg}
+            </p>
+          )}
         </section>
 
         {/* Bagian 4: Pengelolaan Data Lokal */}

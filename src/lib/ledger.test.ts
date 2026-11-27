@@ -17,9 +17,12 @@ import {
   computeMonthlyBudgetStatuses,
   createDefaultPreferences,
   getCategoriesForKind,
+  normalizePreferences,
   previewBudgetImpact,
+  removeAccountVisualPreference,
   removeCustomCategory,
-  setCategoryBudget
+  setCategoryBudget,
+  updateAccountVisualPreference
 } from './preferences';
 import type { LedgerState } from './types';
 
@@ -409,6 +412,26 @@ describe('Mesin Akuntansi Multi-Rekening KasPresisi', () => {
     prefs = removeCustomCategory(prefs, 'expense', 'Cicilan Kendaraan');
     expect(getCategoriesForKind(prefs, 'expense')).not.toContain('Cicilan Kendaraan');
     expect(prefs.monthlyBudgets['Cicilan Kendaraan']).toBeUndefined();
+  });
+
+  it('menyimpan, menormalkan, dan menghapus warna serta ikon kustom kartu rekening untuk sinkronisasi lintas HP', () => {
+    let prefs = createDefaultPreferences();
+    prefs = updateAccountVisualPreference(prefs, 'acc_bca', {
+      colorTheme: 'cyan',
+      emblem: 'card'
+    });
+    prefs = updateAccountVisualPreference(prefs, 'acc_bca', {
+      emblem: 'ewallet'
+    });
+
+    const normalized = normalizePreferences(prefs);
+    expect(normalized.accountVisuals.acc_bca).toEqual({
+      colorTheme: 'cyan',
+      emblem: 'ewallet'
+    });
+
+    const cleaned = removeAccountVisualPreference(normalized, 'acc_bca');
+    expect(cleaned.accountVisuals.acc_bca).toBeUndefined();
   });
 
   it('membuat dan memverifikasi kunci PIN lokal 4 digit dan 6 digit dengan benar', async () => {

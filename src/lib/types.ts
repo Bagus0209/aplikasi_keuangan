@@ -83,11 +83,17 @@ export interface LedgerState {
   transfers: Transfer[];
 }
 
+export interface AccountVisualSetting {
+  colorTheme?: AccountColorTheme;
+  emblem?: AccountEmblemKind;
+}
+
 export interface UserPreferences {
   customExpenseCategories: string[];
   customIncomeCategories: string[];
   monthlyBudgets: Record<string, number>;
   budgetWarningThresholdPct: number;
+  accountVisuals: Record<string, AccountVisualSetting>;
 }
 
 export type BudgetHealthStatus = 'safe' | 'warning' | 'exceeded';
