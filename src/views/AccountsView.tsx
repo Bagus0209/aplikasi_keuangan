@@ -3,6 +3,7 @@ import {
   AccountCardEmblem,
   IconCardWatermark,
   IconClose,
+  IconEdit,
   IconEye,
   IconEyeOff,
   IconMoreDots,
@@ -23,24 +24,32 @@ import {
   getTodayIso,
   parseDigitsToNumber
 } from '../lib/format';
-import { computeTotalBalance, type NewAccountInput } from '../lib/ledger';
+import {
+  computeTotalBalance,
+  type NewAccountInput,
+  type UpdateAccountInput
+} from '../lib/ledger';
 import type {
   Account,
   AccountColorTheme,
   AccountEmblemKind,
   AccountType,
+  CategoryBudgetStatus,
   Transaction
 } from '../lib/types';
 
 interface AccountsViewProps {
   accounts: Account[];
   transactions: Transaction[];
+  budgetAlerts: CategoryBudgetStatus[];
   isBusy: boolean;
   onAddAccount: (input: NewAccountInput) => Promise<void>;
+  onUpdateAccount: (input: UpdateAccountInput) => Promise<void>;
   onDeleteAccount: (accountId: string) => Promise<void>;
   onQuickRecordForAccount: (accountId: string) => void;
   onQuickTransferFromAccount: (accountId: string) => void;
   onOpenReport: () => void;
+  onOpenBudgets: () => void;
   onLoadSimulation: () => void;
   onOpenSettings: () => void;
 }
@@ -50,12 +59,15 @@ type CategoryFilter = 'all' | AccountType;
 export function AccountsView({
   accounts,
   transactions,
+  budgetAlerts,
   isBusy,
   onAddAccount,
+  onUpdateAccount,
   onDeleteAccount,
   onQuickRecordForAccount,
   onQuickTransferFromAccount,
   onOpenReport,
+  onOpenBudgets,
   onLoadSimulation,
   onOpenSettings
 }: AccountsViewProps): React.ReactElement {
@@ -83,11 +95,22 @@ export function AccountsView({
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Mode Edit Rekening di dalam Modal Detail
+  const [isEditingAccount, setIsEditingAccount] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editType, setEditType] = useState<AccountType>('bank');
+  const [editMaskedNumber, setEditMaskedNumber] = useState('');
+  const [editRoleTag, setEditRoleTag] = useState('');
+  const [editBalanceRaw, setEditBalanceRaw] = useState('');
+  const [editBalanceNegative, setEditBalanceNegative] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowAddModal(false);
         setSelectedAccountId(null);
+        setIsEditingAccount(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -170,6 +193,45 @@ export function AccountsView({
   ) => {
     const updated = saveAccountVisual(accountId, patch);
     setVisualMap(updated);
+  };
+
+  const startEditAccount = (acc: Account) => {
+    setEditName(acc.name);
+    setEditType(acc.type);
+    setEditMaskedNumber(acc.maskedNumber);
+    setEditRoleTag(acc.roleTag);
+    setEditBalanceNegative(acc.balance < 0);
+    setEditBalanceRaw(
+      acc.balance === 0 ? '0' : formatNumberInput(Math.abs(acc.balance))
+    );
+    setEditError(null);
+    setConfirmDelete(false);
+    setIsEditingAccount(true);
+  };
+
+  const handleSaveEditAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAccount) return;
+    setEditError(null);
+    if (!editName.trim()) {
+      setEditError('Nama rekening wajib diisi.');
+      return;
+    }
+    const absBal = parseDigitsToNumber(editBalanceRaw);
+    const nextBalance = editBalanceNegative ? -absBal : absBal;
+    try {
+      await onUpdateAccount({
+        id: selectedAccount.id,
+        name: editName.trim(),
+        type: editType,
+        maskedNumber: editMaskedNumber.trim(),
+        roleTag: editRoleTag.trim() || defaultRoleForType(editType),
+        balance: nextBalance
+      });
+      setIsEditingAccount(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Gagal memperbarui rekening.');
+    }
   };
 
   const formatBalanceText = (amount: number): string => {
@@ -318,6 +380,36 @@ export function AccountsView({
         )}
       </section>
 
+      {/* Peringatan Anggaran Bulanan jika ada kategori mendekati/melewati batas */}
+      {budgetAlerts.length > 0 && (
+        <section
+          aria-label="Peringatan anggaran bulanan"
+          className={`rounded-2xl border px-3.5 py-2.5 flex items-center justify-between gap-2.5 ${
+            budgetAlerts.some((b) => b.status === 'exceeded')
+              ? 'bg-[#FEF2F2] border-[#FECACA] text-[#9F1D2C]'
+              : 'bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]'
+          }`}
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-bold truncate">
+              {budgetAlerts.some((b) => b.status === 'exceeded')
+                ? `${budgetAlerts.filter((b) => b.status === 'exceeded').length} kategori melewati batas anggaran`
+                : `${budgetAlerts.length} kategori mendekati batas anggaran`}
+            </p>
+            <p className="text-[11px] truncate opacity-90">
+              {budgetAlerts[0].category}: {budgetAlerts[0].percent}% terpakai bulan ini
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenBudgets}
+            className="min-h-[38px] shrink-0 rounded-xl bg-white/90 border border-current/20 px-3 text-[11px] font-bold hover:bg-white"
+          >
+            Lihat
+          </button>
+        </section>
+      )}
+
       {/* Grid 2 Kolom Kartu Rekening */}
       {accounts.length === 0 ? (
         <div className="rounded-2xl bg-white p-5 border border-[#ECEFF4] space-y-3">
@@ -375,6 +467,7 @@ export function AccountsView({
                 type="button"
                 onClick={() => {
                   setConfirmDelete(false);
+                  setIsEditingAccount(false);
                   setSelectedAccountId(acc.id);
                 }}
                 className={`group relative flex min-h-[164px] flex-col justify-between rounded-2xl border p-3.5 text-left shadow-xs transition-transform active:scale-[0.98] ${theme.bgClass} ${theme.borderClass}`}
@@ -645,7 +738,10 @@ export function AccountsView({
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedAccountId(null)}
+                    onClick={() => {
+                      setIsEditingAccount(false);
+                      setSelectedAccountId(null);
+                    }}
                     aria-label="Tutup detail rekening"
                     className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-[#DCE2EC] text-[#0B1220]"
                   >
@@ -653,117 +749,260 @@ export function AccountsView({
                   </button>
                 </div>
 
-                <div className="rounded-xl bg-[#F8FAFC] border border-[#DCE2EC] p-3.5 flex items-baseline justify-between">
-                  <span className="text-xs font-semibold text-[#475569]">Saldo Saat Ini</span>
-                  <span className="text-xl font-bold text-[#0B1220] tnum">
-                    {formatRupiah(selectedAccount.balance)}
-                  </span>
-                </div>
+                {isEditingAccount ? (
+                  <form onSubmit={handleSaveEditAccount} className="space-y-3">
+                    {editError && (
+                      <p
+                        role="alert"
+                        className="rounded-xl bg-[#FEF2F2] border border-[#FECACA] p-2.5 text-xs font-semibold text-[#9F1D2C]"
+                      >
+                        {editError}
+                      </p>
+                    )}
 
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const id = selectedAccount.id;
-                      setSelectedAccountId(null);
-                      onQuickRecordForAccount(id);
-                    }}
-                    className="w-full min-h-[46px] rounded-xl bg-[#0F4C81] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#09355C]"
-                  >
-                    Catat Pemasukan / Pengeluaran di Rekening Ini
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const id = selectedAccount.id;
-                      setSelectedAccountId(null);
-                      onQuickTransferFromAccount(id);
-                    }}
-                    className="w-full min-h-[44px] rounded-xl border border-[#0B1220] bg-white px-4 py-2.5 text-xs font-bold text-[#0B1220] hover:bg-[#F8FAFC]"
-                  >
-                    Pindah Saldo dari Rekening Ini
-                  </button>
-                </div>
-
-                <div className="pt-2 border-t border-[#F1F5F9] space-y-2">
-                  <span className="block text-xs font-bold text-[#0B1220]">
-                    Ubah Warna & Ikon Kartu
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {Object.values(ACCOUNT_CARD_THEMES).map((th) => (
-                      <button
-                        key={th.key}
-                        type="button"
-                        onClick={() =>
-                          handleUpdateAccountVisual(selectedAccount.id, { colorTheme: th.key })
-                        }
-                        aria-label={`Ubah warna kartu ke ${th.label}`}
-                        style={{ backgroundColor: th.swatchHex }}
-                        className={`h-8 w-8 rounded-full border-2 ${
-                          theme.key === th.key ? 'border-[#0B1220] scale-110' : 'border-[#CBD5E1]'
-                        }`}
+                    <div>
+                      <label htmlFor="edit-acc-name" className="block text-xs font-bold text-[#0B1220] mb-1">
+                        Nama Rekening / Kantong
+                      </label>
+                      <input
+                        id="edit-acc-name"
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-sm text-[#0B1220]"
+                        required
                       />
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(
-                      [
-                        { key: 'bag', label: 'Kantong' },
-                        { key: 'card', label: 'Kartu' },
-                        { key: 'ewallet', label: 'E-Wallet' }
-                      ] as const
-                    ).map((em) => (
-                      <button
-                        key={em.key}
-                        type="button"
-                        onClick={() =>
-                          handleUpdateAccountVisual(selectedAccount.id, { emblem: em.key })
-                        }
-                        className={`min-h-[38px] rounded-xl border text-xs font-semibold ${
-                          emblem === em.key
-                            ? 'border-[#0F4C81] bg-[#EFF6FF] text-[#0F4C81]'
-                            : 'border-[#CBD5E1] bg-white text-[#475569]'
-                        }`}
-                      >
-                        {em.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                    </div>
 
-                <div className="pt-2 border-t border-[#F1F5F9]">
-                  {!confirmDelete ? (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDelete(true)}
-                      className="w-full min-h-[44px] rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-2 text-xs font-bold text-[#9F1D2C]"
-                    >
-                      Hapus Rekening Ini
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={async () => {
-                          await onDeleteAccount(selectedAccount.id);
-                          setConfirmDelete(false);
-                          setSelectedAccountId(null);
+                    <div>
+                      <span className="block text-xs font-bold text-[#0B1220] mb-1">
+                        Kategori Rekening
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(
+                          [
+                            { key: 'bank', label: 'Bank' },
+                            { key: 'ewallet', label: 'E-Wallet' },
+                            { key: 'cash', label: 'Tunai' }
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => setEditType(opt.key)}
+                            className={`min-h-[42px] rounded-xl border text-xs font-bold ${
+                              editType === opt.key
+                                ? 'border-[#0F4C81] bg-[#0F4C81] text-white'
+                                : 'border-[#CBD5E1] bg-white text-[#0B1220]'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label htmlFor="edit-acc-mask" className="block text-xs font-bold text-[#0B1220] mb-1">
+                          Info Nomor
+                        </label>
+                        <input
+                          id="edit-acc-mask"
+                          type="text"
+                          value={editMaskedNumber}
+                          onChange={(e) => setEditMaskedNumber(e.target.value)}
+                          className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-sm text-[#0B1220]"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="edit-acc-role" className="block text-xs font-bold text-[#0B1220] mb-1">
+                          Label Keterangan
+                        </label>
+                        <input
+                          id="edit-acc-role"
+                          type="text"
+                          value={editRoleTag}
+                          onChange={(e) => setEditRoleTag(e.target.value)}
+                          className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-sm text-[#0B1220]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label htmlFor="edit-acc-bal" className="text-xs font-bold text-[#0B1220]">
+                          Koreksi Saldo Saat Ini (Rp)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditBalanceNegative((v) => !v)}
+                          className={`rounded-lg px-2 py-0.5 text-[11px] font-bold border ${
+                            editBalanceNegative
+                              ? 'border-[#FECACA] bg-[#FEF2F2] text-[#9F1D2C]'
+                              : 'border-[#CBD5E1] bg-[#F8FAFC] text-[#475569]'
+                          }`}
+                        >
+                          {editBalanceNegative ? 'Saldo Minus (-)' : 'Positif (+)'}
+                        </button>
+                      </div>
+                      <input
+                        id="edit-acc-bal"
+                        type="text"
+                        inputMode="numeric"
+                        value={editBalanceRaw}
+                        onChange={(e) => {
+                          const num = parseDigitsToNumber(e.target.value);
+                          setEditBalanceRaw(
+                            num > 0 ? formatNumberInput(num) : e.target.value === '0' ? '0' : ''
+                          );
                         }}
-                        className="flex-1 min-h-[44px] rounded-xl bg-[#9F1D2C] px-3 py-2 text-xs font-bold text-white"
-                      >
-                        Ya, Hapus Rekening
-                      </button>
+                        className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3 py-2 text-base font-bold text-[#0B1220] tnum"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => setConfirmDelete(false)}
-                        className="min-h-[44px] rounded-xl border border-[#CBD5E1] bg-white px-4 py-2 text-xs font-bold text-[#0B1220]"
+                        onClick={() => setIsEditingAccount(false)}
+                        className="min-h-[46px] rounded-xl border border-[#CBD5E1] bg-white px-4 text-xs font-bold text-[#0B1220]"
                       >
                         Batal
                       </button>
+                      <button
+                        type="submit"
+                        disabled={isBusy}
+                        className="flex-1 min-h-[46px] rounded-xl bg-[#0F4C81] px-4 text-xs font-bold text-white hover:bg-[#09355C] disabled:bg-[#CBD5E1]"
+                      >
+                        {isBusy ? 'Menyimpan...' : 'Simpan Perubahan Rekening'}
+                      </button>
                     </div>
-                  )}
-                </div>
+                  </form>
+                ) : (
+                  <>
+                    <div className="rounded-xl bg-[#F8FAFC] border border-[#DCE2EC] p-3.5 flex items-baseline justify-between">
+                      <span className="text-xs font-semibold text-[#475569]">Saldo Saat Ini</span>
+                      <span className="text-xl font-bold text-[#0B1220] tnum">
+                        {formatRupiah(selectedAccount.balance)}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const id = selectedAccount.id;
+                          setSelectedAccountId(null);
+                          onQuickRecordForAccount(id);
+                        }}
+                        className="w-full min-h-[46px] rounded-xl bg-[#0F4C81] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#09355C]"
+                      >
+                        Catat Pemasukan / Pengeluaran di Rekening Ini
+                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const id = selectedAccount.id;
+                            setSelectedAccountId(null);
+                            onQuickTransferFromAccount(id);
+                          }}
+                          className="min-h-[44px] rounded-xl border border-[#0B1220] bg-white px-3 py-2 text-xs font-bold text-[#0B1220] hover:bg-[#F8FAFC]"
+                        >
+                          Pindah Saldo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEditAccount(selectedAccount)}
+                          className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-[#0F4C81] bg-[#EFF6FF] px-3 py-2 text-xs font-bold text-[#0F4C81] hover:bg-[#DBEAFE]"
+                        >
+                          <IconEdit className="w-3.5 h-3.5" />
+                          <span>Edit Rekening</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#F1F5F9] space-y-2">
+                      <span className="block text-xs font-bold text-[#0B1220]">
+                        Ubah Warna & Ikon Kartu
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {Object.values(ACCOUNT_CARD_THEMES).map((th) => (
+                          <button
+                            key={th.key}
+                            type="button"
+                            onClick={() =>
+                              handleUpdateAccountVisual(selectedAccount.id, { colorTheme: th.key })
+                            }
+                            aria-label={`Ubah warna kartu ke ${th.label}`}
+                            style={{ backgroundColor: th.swatchHex }}
+                            className={`h-8 w-8 rounded-full border-2 ${
+                              theme.key === th.key ? 'border-[#0B1220] scale-110' : 'border-[#CBD5E1]'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(
+                          [
+                            { key: 'bag', label: 'Kantong' },
+                            { key: 'card', label: 'Kartu' },
+                            { key: 'ewallet', label: 'E-Wallet' }
+                          ] as const
+                        ).map((em) => (
+                          <button
+                            key={em.key}
+                            type="button"
+                            onClick={() =>
+                              handleUpdateAccountVisual(selectedAccount.id, { emblem: em.key })
+                            }
+                            className={`min-h-[38px] rounded-xl border text-xs font-semibold ${
+                              emblem === em.key
+                                ? 'border-[#0F4C81] bg-[#EFF6FF] text-[#0F4C81]'
+                                : 'border-[#CBD5E1] bg-white text-[#475569]'
+                            }`}
+                          >
+                            {em.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-[#F1F5F9]">
+                      {!confirmDelete ? (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDelete(true)}
+                          className="w-full min-h-[44px] rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-2 text-xs font-bold text-[#9F1D2C]"
+                        >
+                          Hapus Rekening Ini
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={async () => {
+                              await onDeleteAccount(selectedAccount.id);
+                              setConfirmDelete(false);
+                              setSelectedAccountId(null);
+                            }}
+                            className="flex-1 min-h-[44px] rounded-xl bg-[#9F1D2C] px-3 py-2 text-xs font-bold text-white"
+                          >
+                            Ya, Hapus Rekening
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(false)}
+                            className="min-h-[44px] rounded-xl border border-[#CBD5E1] bg-white px-4 py-2 text-xs font-bold text-[#0B1220]"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })()}

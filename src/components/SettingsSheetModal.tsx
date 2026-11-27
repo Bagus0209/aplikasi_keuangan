@@ -1,30 +1,41 @@
 import React, { useEffect, useState } from 'react';
-import { IconClose, IconSheet } from './Icons';
+import { IconClose, IconLock, IconSheet, IconTarget } from './Icons';
 import { isCloudConfigured } from '../lib/api';
-import type { SyncConfig } from '../lib/types';
+import { createPinLockConfig, verifyLocalPin } from '../lib/pinLock';
+import type { PinLockConfig, SyncConfig } from '../lib/types';
 
 interface SettingsSheetModalProps {
   isOpen: boolean;
   config: SyncConfig;
+  pinConfig: PinLockConfig;
   isSyncing: boolean;
   syncError: string | null;
   hasSimulationData: boolean;
   onClose: () => void;
   onSaveAndSync: (nextConfig: SyncConfig) => Promise<void>;
   onDisconnect: () => void;
+  onUpdatePinConfig: (nextPin: PinLockConfig) => void;
+  onDisablePin: () => void;
+  onOpenBudgetManager: () => void;
   onLoadSimulation: () => void;
   onClearLocalData: () => void;
 }
 
+type PinFormMode = 'idle' | 'setup' | 'change' | 'disable';
+
 export function SettingsSheetModal({
   isOpen,
   config,
+  pinConfig,
   isSyncing,
   syncError,
   hasSimulationData,
   onClose,
   onSaveAndSync,
   onDisconnect,
+  onUpdatePinConfig,
+  onDisablePin,
+  onOpenBudgetManager,
   onLoadSimulation,
   onClearLocalData
 }: SettingsSheetModalProps): React.ReactElement | null {
@@ -32,11 +43,27 @@ export function SettingsSheetModal({
   const [secretPin, setSecretPin] = useState(config.secretPin);
   const [confirmClear, setConfirmClear] = useState(false);
 
+  // State pengaturan Kunci PIN Lokal
+  const [pinMode, setPinMode] = useState<PinFormMode>('idle');
+  const [pinLength, setPinLength] = useState<4 | 6>(pinConfig.pinLength);
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number>(pinConfig.autoLockMinutes);
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+  const [pinMsg, setPinMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
   useEffect(() => {
     setScriptUrl(config.scriptUrl);
     setSecretPin(config.secretPin);
     setConfirmClear(false);
-  }, [config, isOpen]);
+    setPinMode('idle');
+    setPinLength(pinConfig.pinLength);
+    setAutoLockMinutes(pinConfig.autoLockMinutes);
+    setCurrentPinInput('');
+    setNewPinInput('');
+    setConfirmPinInput('');
+    setPinMsg(null);
+  }, [config, pinConfig, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,6 +87,69 @@ export function SettingsSheetModal({
     });
   };
 
+  const resetPinInputs = () => {
+    setCurrentPinInput('');
+    setNewPinInput('');
+    setConfirmPinInput('');
+    setPinMode('idle');
+  };
+
+  const handleSavePinForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinMsg(null);
+
+    if (pinMode === 'change' || pinMode === 'disable') {
+      const validOld = await verifyLocalPin(currentPinInput, pinConfig);
+      if (!validOld) {
+        setPinMsg({ type: 'err', text: 'PIN lama tidak cocok.' });
+        return;
+      }
+      if (pinMode === 'disable') {
+        onDisablePin();
+        resetPinInputs();
+        setPinMsg({ type: 'ok', text: 'Kunci PIN lokal telah dinonaktifkan.' });
+        return;
+      }
+    }
+
+    const cleanNew = newPinInput.replace(/[^\d]/g, '');
+    const cleanConfirm = confirmPinInput.replace(/[^\d]/g, '');
+    if (cleanNew.length !== pinLength) {
+      setPinMsg({ type: 'err', text: `PIN baru harus tepat ${pinLength} angka.` });
+      return;
+    }
+    if (cleanNew !== cleanConfirm) {
+      setPinMsg({ type: 'err', text: 'Konfirmasi PIN baru tidak sama.' });
+      return;
+    }
+
+    try {
+      const nextCfg = await createPinLockConfig(cleanNew, pinLength, autoLockMinutes);
+      onUpdatePinConfig(nextCfg);
+      resetPinInputs();
+      setPinMsg({
+        type: 'ok',
+        text: `Kunci PIN lokal (${pinLength} angka) berhasil diaktifkan.`
+      });
+    } catch (err) {
+      setPinMsg({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Gagal menyimpan PIN lokal.'
+      });
+    }
+  };
+
+  const handleChangeAutoLock = (mins: number) => {
+    setAutoLockMinutes(mins);
+    if (pinConfig.enabled) {
+      onUpdatePinConfig({
+        ...pinConfig,
+        autoLockMinutes: mins
+      });
+      setPinMsg({ type: 'ok', text: 'Pengaturan kunci otomatis diperbarui.' });
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-[#0B1220]/60 p-0 md:p-4"
@@ -75,10 +165,10 @@ export function SettingsSheetModal({
             </span>
             <div>
               <h2 id="modal-sheet-title" className="text-base font-bold text-[#0B1220]">
-                Koneksi Google Sheet Pribadi
+                Pengaturan & Koneksi Sheet
               </h2>
               <p className="text-xs text-[#475569]">
-                Sinkronkan saldo, mutasi, dan foto struk Google Drive
+                Sinkronisasi Google Sheet, kunci PIN lokal, dan anggaran
               </p>
             </div>
           </div>
@@ -92,7 +182,8 @@ export function SettingsSheetModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+        {/* Bagian 1: Koneksi Google Sheet */}
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
           {connected && config.spreadsheetName && (
             <div className="rounded-xl bg-[#ECFDF5] border border-[#A7F3D0] p-3 text-xs text-[#0D6848]">
               <p className="font-bold">Terhubung ke: {config.spreadsheetName}</p>
@@ -145,7 +236,7 @@ export function SettingsSheetModal({
               htmlFor="gas-pin"
               className="block text-xs font-bold text-[#0B1220] mb-1.5"
             >
-              PIN / Kunci Rahasia Pribadi
+              PIN / Kunci Rahasia Google Sheet
             </label>
             <input
               id="gas-pin"
@@ -162,7 +253,7 @@ export function SettingsSheetModal({
             <button
               type="submit"
               disabled={isSyncing || !scriptUrl.trim() || !secretPin.trim()}
-              className="w-full min-h-[48px] rounded-xl bg-[#0F4C81] px-4 py-3 text-sm font-bold text-white hover:bg-[#09355C] active:bg-[#072846] disabled:bg-[#CBD5E1] disabled:text-[#475569]"
+              className="w-full min-h-[46px] rounded-xl bg-[#0F4C81] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#09355C] active:bg-[#072846] disabled:bg-[#CBD5E1] disabled:text-[#475569]"
             >
               {isSyncing
                 ? 'Sedang Menghubungi Google Sheet...'
@@ -173,7 +264,7 @@ export function SettingsSheetModal({
               <button
                 type="button"
                 onClick={onDisconnect}
-                className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-white px-4 py-2.5 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC]"
+                className="w-full min-h-[44px] rounded-xl border border-[#CBD5E1] bg-white px-4 py-2 text-xs font-bold text-[#475569] hover:bg-[#F8FAFC]"
               >
                 Putuskan Koneksi Cloud (Gunakan Mode Lokal HP)
               </button>
@@ -181,6 +272,224 @@ export function SettingsSheetModal({
           </div>
         </form>
 
+        {/* Bagian 2: Keamanan Kunci PIN Lokal */}
+        <section className="mt-5 pt-4 border-t border-[#DCE2EC] space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <IconLock className="w-4 h-4 text-[#0F4C81]" />
+              <p className="text-xs font-bold text-[#0B1220]">Kunci PIN Lokal (Privasi Saldo)</p>
+            </div>
+            <span
+              className={`rounded-md px-2 py-0.5 text-[10px] font-bold border ${
+                pinConfig.enabled
+                  ? 'bg-[#ECFDF5] text-[#0D6848] border-[#A7F3D0]'
+                  : 'bg-[#F8FAFC] text-[#475569] border-[#CBD5E1]'
+              }`}
+            >
+              {pinConfig.enabled ? `Aktif (${pinConfig.pinLength} Digit)` : 'Nonaktif'}
+            </span>
+          </div>
+
+          {pinMsg && (
+            <p
+              role={pinMsg.type === 'err' ? 'alert' : 'status'}
+              className={`rounded-xl border p-2.5 text-xs font-semibold ${
+                pinMsg.type === 'err'
+                  ? 'bg-[#FEF2F2] border-[#FECACA] text-[#9F1D2C]'
+                  : 'bg-[#ECFDF5] border-[#A7F3D0] text-[#0D6848]'
+              }`}
+            >
+              {pinMsg.text}
+            </p>
+          )}
+
+          {pinMode === 'idle' ? (
+            <div className="space-y-2.5">
+              {!pinConfig.enabled ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinMsg(null);
+                    setPinMode('setup');
+                  }}
+                  className="w-full min-h-[44px] rounded-xl border border-[#0F4C81] bg-[#EFF6FF] px-3.5 py-2 text-xs font-bold text-[#0F4C81] hover:bg-[#DBEAFE]"
+                >
+                  Aktifkan Kunci PIN Lokal
+                </button>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <span className="block text-[11px] font-bold text-[#475569]">
+                      Kunci Otomatis
+                    </span>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {[
+                        { mins: 0, label: 'Saat dibuka' },
+                        { mins: 1, label: '1 menit' },
+                        { mins: 5, label: '5 menit' }
+                      ].map((opt) => (
+                        <button
+                          key={opt.mins}
+                          type="button"
+                          onClick={() => handleChangeAutoLock(opt.mins)}
+                          className={`min-h-[38px] rounded-lg border text-[11px] font-bold ${
+                            autoLockMinutes === opt.mins
+                              ? 'border-[#0F4C81] bg-[#0F4C81] text-white'
+                              : 'border-[#CBD5E1] bg-white text-[#475569]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPinMsg(null);
+                        setPinMode('change');
+                      }}
+                      className="min-h-[42px] rounded-xl border border-[#CBD5E1] bg-white px-3 text-xs font-bold text-[#0B1220] hover:bg-[#F8FAFC]"
+                    >
+                      Ubah PIN
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPinMsg(null);
+                        setPinMode('disable');
+                      }}
+                      className="min-h-[42px] rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-3 text-xs font-bold text-[#9F1D2C]"
+                    >
+                      Matikan PIN
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <form onSubmit={handleSavePinForm} className="rounded-xl bg-[#F8FAFC] border border-[#DCE2EC] p-3 space-y-2.5">
+              {(pinMode === 'change' || pinMode === 'disable') && (
+                <div>
+                  <label htmlFor="pin-current" className="block text-[11px] font-bold text-[#0B1220] mb-1">
+                    Masukkan PIN Lama ({pinConfig.pinLength} angka)
+                  </label>
+                  <input
+                    id="pin-current"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={pinConfig.pinLength}
+                    value={currentPinInput}
+                    onChange={(e) => setCurrentPinInput(e.target.value.replace(/[^\d]/g, ''))}
+                    placeholder="••••"
+                    className="w-full min-h-[42px] rounded-lg border border-[#CBD5E1] bg-white px-3 text-sm font-bold tracking-widest text-[#0B1220] tnum"
+                    required
+                  />
+                </div>
+              )}
+
+              {pinMode !== 'disable' && (
+                <>
+                  <div>
+                    <span className="block text-[11px] font-bold text-[#0B1220] mb-1">
+                      Panjang PIN
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([4, 6] as const).map((len) => (
+                        <button
+                          key={len}
+                          type="button"
+                          onClick={() => {
+                            setPinLength(len);
+                            setNewPinInput('');
+                            setConfirmPinInput('');
+                          }}
+                          className={`min-h-[38px] rounded-lg border text-xs font-bold ${
+                            pinLength === len
+                              ? 'border-[#0F4C81] bg-[#0F4C81] text-white'
+                              : 'border-[#CBD5E1] bg-white text-[#475569]'
+                          }`}
+                        >
+                          {len} Digit
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="pin-new" className="block text-[11px] font-bold text-[#0B1220] mb-1">
+                      PIN Baru ({pinLength} angka)
+                    </label>
+                    <input
+                      id="pin-new"
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={pinLength}
+                      value={newPinInput}
+                      onChange={(e) => setNewPinInput(e.target.value.replace(/[^\d]/g, ''))}
+                      placeholder={pinLength === 4 ? '4 angka' : '6 angka'}
+                      className="w-full min-h-[42px] rounded-lg border border-[#CBD5E1] bg-white px-3 text-sm font-bold tracking-widest text-[#0B1220] tnum"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="pin-confirm" className="block text-[11px] font-bold text-[#0B1220] mb-1">
+                      Ulangi PIN Baru
+                    </label>
+                    <input
+                      id="pin-confirm"
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={pinLength}
+                      value={confirmPinInput}
+                      onChange={(e) => setConfirmPinInput(e.target.value.replace(/[^\d]/g, ''))}
+                      placeholder="Ketik ulang PIN baru"
+                      className="w-full min-h-[42px] rounded-lg border border-[#CBD5E1] bg-white px-3 text-sm font-bold tracking-widest text-[#0B1220] tnum"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={resetPinInputs}
+                  className="min-h-[42px] rounded-lg border border-[#CBD5E1] bg-white px-3 text-xs font-bold text-[#0B1220]"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className={`flex-1 min-h-[42px] rounded-lg px-3 text-xs font-bold text-white ${
+                    pinMode === 'disable' ? 'bg-[#9F1D2C]' : 'bg-[#0F4C81]'
+                  }`}
+                >
+                  {pinMode === 'disable' ? 'Konfirmasi Matikan PIN' : 'Simpan PIN Lokal'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+
+        {/* Bagian 3: Kategori & Anggaran Bulanan */}
+        <section className="mt-5 pt-4 border-t border-[#DCE2EC]">
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onOpenBudgetManager();
+            }}
+            className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-[#CBD5E1] bg-[#F8FAFC] px-3.5 py-2 text-xs font-bold text-[#0B1220] hover:bg-[#EFF6FF]"
+          >
+            <IconTarget className="w-4 h-4 text-[#0F4C81]" />
+            <span>Kelola Kategori Kustom & Anggaran Bulanan</span>
+          </button>
+        </section>
+
+        {/* Bagian 4: Pengelolaan Data Lokal */}
         <div className="mt-5 pt-4 border-t border-[#DCE2EC] space-y-2.5">
           <p className="text-xs font-bold text-[#0B1220]">Pengelolaan Data Lokal di Perangkat</p>
           <div className="grid grid-cols-1 gap-2">

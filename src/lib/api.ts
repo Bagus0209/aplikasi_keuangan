@@ -1,4 +1,12 @@
-import type { Account, LedgerState, SyncConfig, Transaction, Transfer } from './types';
+import { normalizePreferences } from './preferences';
+import type {
+  Account,
+  LedgerState,
+  SyncConfig,
+  Transaction,
+  Transfer,
+  UserPreferences
+} from './types';
 
 const STORAGE_LEDGER_KEY = 'kaspresisi_ledger_v1';
 const STORAGE_CONFIG_KEY = 'kaspresisi_sync_config_v1';
@@ -59,6 +67,7 @@ interface AppsScriptResponse {
   accounts?: Account[];
   transactions?: Transaction[];
   transfers?: Transfer[];
+  preferences?: Partial<UserPreferences>;
 }
 
 /**
@@ -95,13 +104,20 @@ async function callAppsScript(
 
   const data = (await response.json()) as AppsScriptResponse;
   if (!data.ok) {
-    throw new Error(data.error || 'Permintaan ditolak oleh Google Apps Script.');
+    const rawErr = data.error || 'Permintaan ditolak oleh Google Apps Script.';
+    if (rawErr.includes('Aksi tidak dikenali')) {
+      throw new Error(
+        'Google Apps Script Anda masih memakai versi lama. Perbarui Code.gs di Google Sheet (Manage deployments -> New version) agar fitur edit & anggaran tersinkron ke cloud.'
+      );
+    }
+    throw new Error(rawErr);
   }
   return data;
 }
 
 export async function syncFromGoogleSheet(config: SyncConfig): Promise<{
   ledger: LedgerState;
+  preferences?: UserPreferences;
   spreadsheetName?: string;
   spreadsheetUrl?: string;
 }> {
@@ -112,14 +128,24 @@ export async function syncFromGoogleSheet(config: SyncConfig): Promise<{
       transactions: res.transactions || [],
       transfers: res.transfers || []
     },
+    preferences: res.preferences ? normalizePreferences(res.preferences) : undefined,
     spreadsheetName: res.spreadsheetName,
     spreadsheetUrl: res.spreadsheetUrl
   };
 }
 
+export type CloudAction =
+  | 'addAccount'
+  | 'updateAccount'
+  | 'deleteAccount'
+  | 'addTransaction'
+  | 'updateTransaction'
+  | 'deleteTransaction'
+  | 'addTransfer';
+
 export async function pushActionToGoogleSheet(
   config: SyncConfig,
-  action: 'addAccount' | 'deleteAccount' | 'addTransaction' | 'deleteTransaction' | 'addTransfer',
+  action: CloudAction,
   payload: Record<string, unknown>
 ): Promise<LedgerState> {
   const res = await callAppsScript(config, action, payload);
@@ -128,4 +154,20 @@ export async function pushActionToGoogleSheet(
     transactions: res.transactions || [],
     transfers: res.transfers || []
   };
+}
+
+/**
+ * Menyimpan preferensi kategori kustom & anggaran bulanan ke Google Sheet (tab Pengaturan).
+ * Jika Apps Script belum diperbarui ke versi terbaru, tidak menggagalkan penyimpanan lokal.
+ */
+export async function syncPreferencesToGoogleSheet(
+  config: SyncConfig,
+  prefs: UserPreferences
+): Promise<boolean> {
+  try {
+    await callAppsScript(config, 'savePreferences', { preferences: prefs });
+    return true;
+  } catch {
+    return false;
+  }
 }

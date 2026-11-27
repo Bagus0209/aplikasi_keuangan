@@ -8,6 +8,7 @@ import type {
   PeriodFilter,
   Transaction,
   TransactionKind,
+  TransactionSearchFilter,
   Transfer
 } from './types';
 
@@ -17,6 +18,17 @@ export interface NewAccountInput {
   maskedNumber: string;
   roleTag: string;
   initialBalance: number;
+  colorTheme?: AccountColorTheme;
+  emblem?: AccountEmblemKind;
+}
+
+export interface UpdateAccountInput {
+  id: string;
+  name: string;
+  type: AccountType;
+  maskedNumber: string;
+  roleTag: string;
+  balance?: number;
   colorTheme?: AccountColorTheme;
   emblem?: AccountEmblemKind;
 }
@@ -33,6 +45,17 @@ export interface NewTransactionInput {
   receiptFileName?: string;
   receiptUrl?: string;
   receiptFileId?: string;
+}
+
+export interface UpdateTransactionInput {
+  id: string;
+  date: string;
+  time: string;
+  kind: TransactionKind;
+  amount: number;
+  category: string;
+  note: string;
+  accountId: string;
 }
 
 export interface NewTransferInput {
@@ -84,6 +107,13 @@ export interface PeriodAnalyticsResult {
   };
 }
 
+export interface TransactionSearchResult {
+  items: Transaction[];
+  totalIncome: number;
+  totalExpense: number;
+  net: number;
+}
+
 export interface DailyReportData {
   date: string;
   totalIncome: number;
@@ -97,7 +127,11 @@ export function computeTotalBalance(accounts: Account[]): number {
   return accounts.reduce((sum, acc) => sum + acc.balance, 0);
 }
 
-export function applyAddAccount(state: LedgerState, input: NewAccountInput, customId?: string): LedgerState {
+export function applyAddAccount(
+  state: LedgerState,
+  input: NewAccountInput,
+  customId?: string
+): LedgerState {
   const name = input.name.trim();
   if (!name) {
     throw new Error('Nama rekening wajib diisi.');
@@ -119,6 +153,62 @@ export function applyAddAccount(state: LedgerState, input: NewAccountInput, cust
   return {
     ...state,
     accounts: [...state.accounts, newAccount]
+  };
+}
+
+export function applyUpdateAccount(
+  state: LedgerState,
+  input: UpdateAccountInput
+): LedgerState {
+  const existing = state.accounts.find((a) => a.id === input.id);
+  if (!existing) {
+    throw new Error('Rekening yang akan diubah tidak ditemukan.');
+  }
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error('Nama rekening wajib diisi.');
+  }
+
+  const nextBalance =
+    typeof input.balance === 'number' && Number.isFinite(input.balance)
+      ? Math.round(input.balance)
+      : existing.balance;
+
+  const updatedAccounts = state.accounts.map((acc) => {
+    if (acc.id !== input.id) return acc;
+    return {
+      ...acc,
+      name,
+      type: input.type,
+      maskedNumber: input.maskedNumber.trim() || labelForAccountType(input.type),
+      roleTag: input.roleTag.trim() || 'Rekening Aktif',
+      balance: nextBalance,
+      colorTheme: input.colorTheme ?? acc.colorTheme,
+      emblem: input.emblem ?? acc.emblem
+    };
+  });
+
+  const updatedTransactions =
+    name === existing.name
+      ? state.transactions
+      : state.transactions.map((tx) =>
+          tx.accountId === input.id ? { ...tx, accountName: name } : tx
+        );
+
+  const updatedTransfers =
+    name === existing.name
+      ? state.transfers
+      : state.transfers.map((tr) => ({
+          ...tr,
+          fromAccountName: tr.fromAccountId === input.id ? name : tr.fromAccountName,
+          toAccountName: tr.toAccountId === input.id ? name : tr.toAccountName
+        }));
+
+  return {
+    ...state,
+    accounts: updatedAccounts,
+    transactions: updatedTransactions,
+    transfers: updatedTransfers
   };
 }
 
@@ -207,6 +297,62 @@ export function applyAddTransaction(
   };
 }
 
+export function applyUpdateTransaction(
+  state: LedgerState,
+  input: UpdateTransactionInput
+): LedgerState {
+  const existing = state.transactions.find((t) => t.id === input.id);
+  if (!existing) {
+    throw new Error('Transaksi yang akan diubah tidak ditemukan.');
+  }
+  const targetAccount = state.accounts.find((a) => a.id === input.accountId);
+  if (!targetAccount) {
+    throw new Error('Rekening tujuan tidak ditemukan.');
+  }
+  const amount = Math.round(Math.abs(input.amount || 0));
+  if (amount <= 0) {
+    throw new Error('Nominal transaksi harus lebih dari Rp 0.');
+  }
+
+  // Langkah 1: kembalikan efek transaksi lama ke rekening lama
+  const revertedAccounts = state.accounts.map((acc) => {
+    if (acc.id !== existing.accountId) return acc;
+    const reverted =
+      existing.kind === 'income' ? acc.balance - existing.amount : acc.balance + existing.amount;
+    return { ...acc, balance: reverted };
+  });
+
+  // Langkah 2: terapkan transaksi baru ke rekening tujuan
+  const targetAfterRevert = revertedAccounts.find((a) => a.id === input.accountId)!;
+  const balanceBefore = targetAfterRevert.balance;
+  const balanceAfter =
+    input.kind === 'income' ? balanceBefore + amount : balanceBefore - amount;
+
+  const updatedAccounts = revertedAccounts.map((acc) =>
+    acc.id === input.accountId ? { ...acc, balance: balanceAfter } : acc
+  );
+
+  const updatedTx: Transaction = {
+    ...existing,
+    date: input.date || existing.date,
+    time: input.time || existing.time,
+    kind: input.kind,
+    amount,
+    category: input.category.trim() || (input.kind === 'income' ? 'Pemasukan' : 'Pengeluaran'),
+    note: input.note.trim(),
+    accountId: targetAccount.id,
+    accountName: targetAccount.name,
+    balanceBefore,
+    balanceAfter
+  };
+
+  return {
+    ...state,
+    accounts: updatedAccounts,
+    transactions: state.transactions.map((t) => (t.id === input.id ? updatedTx : t))
+  };
+}
+
 export function applyDeleteTransaction(state: LedgerState, txId: string): LedgerState {
   const target = state.transactions.find((t) => t.id === txId);
   if (!target) return state;
@@ -222,6 +368,45 @@ export function applyDeleteTransaction(state: LedgerState, txId: string): Ledger
     ...state,
     accounts: updatedAccounts,
     transactions: state.transactions.filter((t) => t.id !== txId)
+  };
+}
+
+export function filterTransactions(
+  transactions: Transaction[],
+  filter: TransactionSearchFilter
+): TransactionSearchResult {
+  const q = filter.query.trim().toLowerCase();
+  const digitsQuery = filter.query.replace(/[^\d]/g, '');
+
+  const matched = transactions.filter((tx) => {
+    if (filter.kind !== 'all' && tx.kind !== filter.kind) return false;
+    if (filter.accountId !== 'all' && tx.accountId !== filter.accountId) return false;
+    if (filter.category !== 'all' && tx.category !== filter.category) return false;
+    if (filter.dateFrom && tx.date < filter.dateFrom) return false;
+    if (filter.dateTo && tx.date > filter.dateTo) return false;
+
+    if (q) {
+      const hay = `${tx.note} ${tx.category} ${tx.accountName} ${tx.date}`.toLowerCase();
+      const amountMatch = digitsQuery.length >= 2 && String(tx.amount).includes(digitsQuery);
+      if (!hay.includes(q) && !amountMatch) return false;
+    }
+
+    return true;
+  });
+
+  const sorted = sortByDateTimeDesc(matched);
+  let totalIncome = 0;
+  let totalExpense = 0;
+  for (const t of sorted) {
+    if (t.kind === 'income') totalIncome += t.amount;
+    else totalExpense += t.amount;
+  }
+
+  return {
+    items: sorted,
+    totalIncome,
+    totalExpense,
+    net: totalIncome - totalExpense
   };
 }
 
@@ -430,7 +615,6 @@ export function computePeriodAnalytics(
     };
   }
 
-  // monthly: group into Minggu 1..5 of the month
   const weekRanges = [
     { label: 'Mgg 1', minDay: 1, maxDay: 7 },
     { label: 'Mgg 2', minDay: 8, maxDay: 14 },
@@ -567,7 +751,7 @@ export function createSimulationDataset(today = getTodayIso()): LedgerState {
       time: '12:40',
       kind: 'expense',
       amount: 85_000,
-      category: 'Konsumsi & Rapat',
+      category: 'Konsumsi & Makan',
       note: 'Kopi tim & parkir klien [SIMULASI]',
       accountId: accBca.id,
       accountName: accBca.name,
@@ -597,7 +781,7 @@ export function createSimulationDataset(today = getTodayIso()): LedgerState {
       time: '19:20',
       kind: 'expense',
       amount: 340_000,
-      category: 'Belanja Rumah',
+      category: 'Belanja Harian',
       note: 'Belanja bahan dapur mingguan [SIMULASI]',
       accountId: accMandiri.id,
       accountName: accMandiri.name,
@@ -612,7 +796,7 @@ export function createSimulationDataset(today = getTodayIso()): LedgerState {
       time: '10:05',
       kind: 'income',
       amount: 2_500_000,
-      category: 'Gaji & Honor',
+      category: 'Gaji & Upah',
       note: 'Honor konsultasi bulanan [SIMULASI]',
       accountId: accBca.id,
       accountName: accBca.name,

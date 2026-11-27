@@ -39,3 +39,12 @@ Seluruh data rekening, catatan pemasukan/pengeluaran, mutasi antar rekening, ser
 4. Untuk memasang aplikasi ke Layar Utama HP:
    - **Android (Chrome):** Ketuk menu titik tiga di pojok kanan atas > pilih **Tambahkan ke layar utama (Install app / Add to Home screen)**.
    - **iPhone (Safari):** Ketuk tombol **Share (Bagikan)** di bawah > pilih **Add to Home Screen**.
+
+---
+
+## Cara Memperbarui `Code.gs` (Jika Sudah Pernah Deploy Sebelumnya)
+Agar fitur **Edit Rekening**, **Edit Transaksi**, serta sinkronisasi **Kategori Kustom & Anggaran Bulanan** ikut tersimpan ke Google Sheet (tanpa mengubah Web App URL yang sudah terpasang di HP Anda):
+1. Buka Google Sheet Anda > klik **Extensions > Apps Script**.
+2. Ganti seluruh isi `Code.gs` dengan versi terbaru dari [Code.gs](./Code.gs) (pastikan `DEFAULT_SECRET_PIN` tetap sama jika belum tersimpan di tab `Pengaturan`, lalu tekan **Ctrl+S**).
+3. Klik **Deploy > Manage deployments** > klik ikon pensil (**Edit**) pada deployment aktif > pada kolom *Version* pilih **New version** > klik **Deploy**.
+4. Selesai! Web App URL tetap sama, tidak perlu menyambungkan ulang di HP.

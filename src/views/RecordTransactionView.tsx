@@ -9,43 +9,34 @@ import {
   parseDigitsToNumber
 } from '../lib/format';
 import { previewTransactionBalance, type NewTransactionInput } from '../lib/ledger';
-import type { Account, TransactionKind } from '../lib/types';
+import { getCategoriesForKind, previewBudgetImpact } from '../lib/preferences';
+import type { Account, Transaction, TransactionKind, UserPreferences } from '../lib/types';
 
 interface RecordTransactionViewProps {
   accounts: Account[];
+  transactions: Transaction[];
+  preferences: UserPreferences;
   preselectedAccountId?: string;
   isBusy: boolean;
   onSaveTransaction: (
     input: NewTransactionInput,
     receiptBase64?: string
   ) => Promise<void>;
+  onAddCustomCategory: (kind: TransactionKind, name: string) => void;
+  onOpenBudgetManager: () => void;
   onGoToAddAccount: () => void;
   onPreviewReceipt: (url: string, caption: string) => void;
 }
 
-const EXPENSE_CATEGORIES = [
-  'Konsumsi & Makan',
-  'Belanja Harian',
-  'Transportasi & BBM',
-  'Tagihan & Listrik',
-  'Perlengkapan Kerja',
-  'Kesehatan',
-  'Lainnya'
-];
-
-const INCOME_CATEGORIES = [
-  'Gaji & Upah',
-  'Pendapatan Proyek',
-  'Hasil Usaha',
-  'Pengembalian Dana',
-  'Lainnya'
-];
-
 export function RecordTransactionView({
   accounts,
+  transactions,
+  preferences,
   preselectedAccountId,
   isBusy,
   onSaveTransaction,
+  onAddCustomCategory,
+  onOpenBudgetManager,
   onGoToAddAccount,
   onPreviewReceipt
 }: RecordTransactionViewProps): React.ReactElement {
@@ -54,10 +45,14 @@ export function RecordTransactionView({
     preselectedAccountId || accounts[0]?.id || ''
   );
   const [amountRaw, setAmountRaw] = useState('');
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [category, setCategory] = useState(() => getCategoriesForKind(preferences, 'expense')[0]);
   const [note, setNote] = useState('');
   const [date, setDate] = useState(getTodayIso());
   const [time, setTime] = useState(getNowTime());
+
+  const [showAddCat, setShowAddCat] = useState(false);
+  const [customCatDraft, setCustomCatDraft] = useState('');
+  const [customCatErr, setCustomCatErr] = useState<string | null>(null);
 
   const [receipt, setReceipt] = useState<CompressedReceipt | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
@@ -65,6 +60,8 @@ export function RecordTransactionView({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const categories = getCategoriesForKind(preferences, kind);
 
   useEffect(() => {
     if (preselectedAccountId && accounts.some((a) => a.id === preselectedAccountId)) {
@@ -74,12 +71,36 @@ export function RecordTransactionView({
     }
   }, [accounts, preselectedAccountId, accountId]);
 
-  const categories = kind === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+  useEffect(() => {
+    if (!categories.includes(category) && categories[0]) {
+      setCategory(categories[0]);
+    }
+  }, [categories, category]);
 
   const handleSwitchKind = (next: TransactionKind) => {
     setKind(next);
-    setCategory(next === 'expense' ? EXPENSE_CATEGORIES[0] : INCOME_CATEGORIES[0]);
+    const nextList = getCategoriesForKind(preferences, next);
+    setCategory(nextList[0] || 'Lainnya');
+    setShowAddCat(false);
+    setCustomCatErr(null);
     setSuccessMsg(null);
+  };
+
+  const handleQuickAddCategory = () => {
+    const clean = customCatDraft.trim();
+    if (!clean) {
+      setCustomCatErr('Masukkan nama kategori baru.');
+      return;
+    }
+    try {
+      onAddCustomCategory(kind, clean);
+      setCategory(clean);
+      setCustomCatDraft('');
+      setCustomCatErr(null);
+      setShowAddCat(false);
+    } catch (err) {
+      setCustomCatErr(err instanceof Error ? err.message : 'Gagal menambah kategori.');
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,6 +140,11 @@ export function RecordTransactionView({
   const selectedAccount = accounts.find((a) => a.id === accountId) || accounts[0];
   const numericAmount = parseDigitsToNumber(amountRaw);
   const preview = previewTransactionBalance(selectedAccount, kind, numericAmount);
+
+  const budgetImpact =
+    kind === 'expense' && date.length >= 7
+      ? previewBudgetImpact(transactions, preferences, category, date.slice(0, 7), numericAmount)
+      : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,10 +336,22 @@ export function RecordTransactionView({
           </div>
         </div>
 
-        <div className="pt-2 border-t border-[#F1F5F9]">
-          <label htmlFor="tx-category" className="block text-xs font-bold text-[#0B1220] mb-1">
-            Kategori
-          </label>
+        <div className="pt-2 border-t border-[#F1F5F9] space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="tx-category" className="text-xs font-bold text-[#0B1220]">
+              Kategori
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddCat((v) => !v);
+                setCustomCatErr(null);
+              }}
+              className="text-[11px] font-bold text-[#0F4C81] hover:underline"
+            >
+              {showAddCat ? 'Tutup' : '+ Kategori Kustom'}
+            </button>
+          </div>
           <select
             id="tx-category"
             value={category}
@@ -326,6 +364,76 @@ export function RecordTransactionView({
               </option>
             ))}
           </select>
+
+          {showAddCat && (
+            <div className="rounded-xl bg-[#F8FAFC] border border-[#DCE2EC] p-2.5 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  aria-label="Nama kategori kustom baru"
+                  value={customCatDraft}
+                  onChange={(e) => setCustomCatDraft(e.target.value)}
+                  placeholder="Nama kategori baru..."
+                  className="flex-1 min-h-[40px] rounded-lg border border-[#CBD5E1] bg-white px-2.5 text-xs text-[#0B1220]"
+                />
+                <button
+                  type="button"
+                  onClick={handleQuickAddCategory}
+                  className="min-h-[40px] shrink-0 rounded-lg bg-[#0F4C81] px-3 text-xs font-bold text-white"
+                >
+                  Simpan
+                </button>
+              </div>
+              {customCatErr && (
+                <p role="alert" className="text-[11px] font-semibold text-[#9F1D2C]">
+                  {customCatErr}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Indikator Anggaran Bulanan Real-Time untuk kategori terpilih */}
+          {budgetImpact && (
+            <div
+              className={`rounded-xl border p-2.5 text-xs space-y-1.5 ${
+                budgetImpact.status === 'exceeded'
+                  ? 'bg-[#FEF2F2] border-[#FECACA] text-[#9F1D2C]'
+                  : budgetImpact.status === 'warning'
+                    ? 'bg-[#FFFBEB] border-[#FDE68A] text-[#92400E]'
+                    : 'bg-[#F8FAFC] border-[#DCE2EC] text-[#475569]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold">
+                  Anggaran {budgetImpact.category} ({budgetImpact.percent}%)
+                </span>
+                <button
+                  type="button"
+                  onClick={onOpenBudgetManager}
+                  className="text-[11px] font-bold underline shrink-0"
+                >
+                  Atur
+                </button>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-black/10 overflow-hidden">
+                <div
+                  style={{ width: `${Math.min(100, budgetImpact.percent)}%` }}
+                  className={`h-full rounded-full ${
+                    budgetImpact.status === 'exceeded'
+                      ? 'bg-[#9F1D2C]'
+                      : budgetImpact.status === 'warning'
+                        ? 'bg-[#D97706]'
+                        : 'bg-[#0D6848]'
+                  }`}
+                />
+              </div>
+              <p className="text-[11px] tnum">
+                {budgetImpact.status === 'exceeded'
+                  ? `Melebihi batas ${formatRupiah(budgetImpact.limit)} sebesar ${formatRupiah(Math.abs(budgetImpact.remaining))}.`
+                  : `Terpakai ${formatRupiah(budgetImpact.spent)} dari ${formatRupiah(budgetImpact.limit)} (sisa ${formatRupiah(budgetImpact.remaining)}).`}
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2.5">

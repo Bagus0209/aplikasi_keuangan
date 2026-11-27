@@ -136,17 +136,26 @@ function doPost(e) {
       case "addAccount":
         return jsonResponse_(handleAddAccount_(ss, req.payload));
 
+      case "updateAccount":
+        return jsonResponse_(handleUpdateAccount_(ss, req.payload));
+
       case "deleteAccount":
         return jsonResponse_(handleDeleteAccount_(ss, req.payload));
 
       case "addTransaction":
         return jsonResponse_(handleAddTransaction_(ss, settings, req.payload));
 
+      case "updateTransaction":
+        return jsonResponse_(handleUpdateTransaction_(ss, req.payload));
+
       case "deleteTransaction":
         return jsonResponse_(handleDeleteTransaction_(ss, req.payload));
 
       case "addTransfer":
         return jsonResponse_(handleAddTransfer_(ss, req.payload));
+
+      case "savePreferences":
+        return jsonResponse_(handleSavePreferences_(ss, req.payload));
 
       default:
         return jsonResponse_({ ok: false, error: "Aksi tidak dikenali: " + req.action });
@@ -216,14 +225,34 @@ function handleSyncAll_(ss) {
     };
   });
 
+  const settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
+  const settingsMap = getSettingsMap_(settingsSheet);
+  var preferences = null;
+  if (settingsMap.user_preferences) {
+    try {
+      preferences = JSON.parse(settingsMap.user_preferences);
+    } catch (_) {
+      preferences = null;
+    }
+  }
+
   return {
     ok: true,
     spreadsheetName: ss.getName(),
     spreadsheetUrl: ss.getUrl(),
     accounts: accounts,
     transactions: transactions.reverse(),
-    transfers: transfers.reverse()
+    transfers: transfers.reverse(),
+    preferences: preferences
   };
+}
+
+function handleSavePreferences_(ss, payload) {
+  const settingsSheet = ss.getSheetByName(SHEET_SETTINGS);
+  if (payload && payload.preferences) {
+    setSetting_(settingsSheet, "user_preferences", JSON.stringify(payload.preferences));
+  }
+  return { ok: true };
 }
 
 function handleAddAccount_(ss, payload) {
@@ -243,6 +272,62 @@ function handleAddAccount_(ss, payload) {
     nowIso,
     "true"
   ]);
+
+  return handleSyncAll_(ss);
+}
+
+function handleUpdateAccount_(ss, payload) {
+  const accSheet = ss.getSheetByName(SHEET_ACCOUNTS);
+  const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
+  const trfSheet = ss.getSheetByName(SHEET_TRANSFERS);
+
+  const targetId = String(payload.id || "");
+  const data = accSheet.getDataRange().getValues();
+  var oldName = "";
+  var foundRow = -1;
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === targetId && String(data[i][8]) !== "false") {
+      foundRow = i + 1;
+      oldName = String(data[i][1]);
+      break;
+    }
+  }
+
+  if (foundRow === -1) {
+    throw new Error("Rekening yang akan diubah tidak ditemukan di Google Sheet.");
+  }
+
+  const newName = String(payload.name || oldName).trim();
+  if (!newName) {
+    throw new Error("Nama rekening wajib diisi.");
+  }
+
+  accSheet.getRange(foundRow, 2).setValue(newName);
+  accSheet.getRange(foundRow, 3).setValue(String(payload.type || "bank"));
+  accSheet.getRange(foundRow, 4).setValue(String(payload.maskedNumber || ""));
+  accSheet.getRange(foundRow, 5).setValue(String(payload.roleTag || "Rekening Aktif"));
+  if (payload.balance !== undefined && payload.balance !== null && !isNaN(Number(payload.balance))) {
+    accSheet.getRange(foundRow, 7).setValue(Math.round(Number(payload.balance)));
+  }
+
+  if (newName !== oldName) {
+    const txData = txSheet.getDataRange().getValues();
+    for (var t = 1; t < txData.length; t++) {
+      if (String(txData[t][7]) === targetId) {
+        txSheet.getRange(t + 1, 9).setValue(newName);
+      }
+    }
+    const trfData = trfSheet.getDataRange().getValues();
+    for (var r = 1; r < trfData.length; r++) {
+      if (String(trfData[r][3]) === targetId) {
+        trfSheet.getRange(r + 1, 5).setValue(newName);
+      }
+      if (String(trfData[r][5]) === targetId) {
+        trfSheet.getRange(r + 1, 7).setValue(newName);
+      }
+    }
+  }
 
   return handleSyncAll_(ss);
 }
@@ -310,6 +395,70 @@ function handleAddTransaction_(ss, settings, payload) {
     receiptUrl,
     new Date().toISOString()
   ]);
+
+  return handleSyncAll_(ss);
+}
+
+function handleUpdateTransaction_(ss, payload) {
+  const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
+  const accSheet = ss.getSheetByName(SHEET_ACCOUNTS);
+  const data = txSheet.getDataRange().getValues();
+  const targetId = String(payload.id || "");
+  var foundRow = -1;
+  var oldRow = null;
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === targetId) {
+      foundRow = i + 1;
+      oldRow = data[i];
+      break;
+    }
+  }
+
+  if (foundRow === -1 || !oldRow) {
+    throw new Error("Transaksi yang akan diubah tidak ditemukan di Google Sheet.");
+  }
+
+  const newAmount = Math.abs(Number(payload.amount) || 0);
+  if (newAmount <= 0) {
+    throw new Error("Nominal transaksi harus lebih dari Rp 0.");
+  }
+
+  const newKind = payload.kind === "income" ? "income" : "expense";
+  const newAccountId = String(payload.accountId || "");
+  const oldKind = String(oldRow[3]);
+  const oldAmount = Number(oldRow[4]) || 0;
+  const oldAccountId = String(oldRow[7]);
+
+  // 1. Kembalikan saldo rekening lama
+  const oldAccRow = findAccountRow_(accSheet, oldAccountId);
+  if (oldAccRow) {
+    const reverted = oldKind === "income" ? oldAccRow.balance - oldAmount : oldAccRow.balance + oldAmount;
+    accSheet.getRange(oldAccRow.rowIndex, 7).setValue(reverted);
+  }
+
+  // 2. Terapkan transaksi baru ke rekening tujuan
+  const newAccRow = findAccountRow_(accSheet, newAccountId);
+  if (!newAccRow) {
+    throw new Error("Rekening tujuan tidak ditemukan di Google Sheet.");
+  }
+
+  const balanceBefore = Number(newAccRow.balance) || 0;
+  const balanceAfter = newKind === "income" ? balanceBefore + newAmount : balanceBefore - newAmount;
+  accSheet.getRange(newAccRow.rowIndex, 7).setValue(balanceAfter);
+
+  txSheet.getRange(foundRow, 2, 1, 10).setValues([[
+    "'" + String(payload.date),
+    "'" + String(payload.time),
+    newKind,
+    newAmount,
+    String(payload.category || "Umum"),
+    String(payload.note || ""),
+    newAccRow.id,
+    newAccRow.name,
+    balanceBefore,
+    balanceAfter
+  ]]);
 
   return handleSyncAll_(ss);
 }

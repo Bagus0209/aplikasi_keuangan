@@ -11,16 +11,18 @@ import {
   exportDailyReportCsv,
   exportDailyReportPdf
 } from '../lib/reportExporter';
-import type { LedgerState } from '../lib/types';
+import type { LedgerState, Transaction } from '../lib/types';
 
 interface DailyReportViewProps {
   ledger: LedgerState;
+  onEditTransaction: (tx: Transaction) => void;
   onPreviewReceipt: (url: string, caption: string) => void;
   onGoToRecord: () => void;
 }
 
 export function DailyReportView({
   ledger,
+  onEditTransaction,
   onPreviewReceipt,
   onGoToRecord
 }: DailyReportViewProps): React.ReactElement {
@@ -149,6 +151,14 @@ export function DailyReportView({
                           </button>
                         </>
                       )}
+                      <span>•</span>
+                      <button
+                        type="button"
+                        onClick={() => onEditTransaction(tx)}
+                        className="font-bold text-[#0F4C81] hover:underline"
+                      >
+                        Edit
+                      </button>
                     </div>
                   </div>
                   <span

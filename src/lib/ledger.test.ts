@@ -4,10 +4,23 @@ import {
   applyAddTransaction,
   applyAddTransfer,
   applyDeleteTransaction,
+  applyUpdateAccount,
+  applyUpdateTransaction,
   computeDailyReport,
   computePeriodAnalytics,
-  computeTotalBalance
+  computeTotalBalance,
+  filterTransactions
 } from './ledger';
+import { createPinLockConfig, verifyLocalPin } from './pinLock';
+import {
+  addCustomCategory,
+  computeMonthlyBudgetStatuses,
+  createDefaultPreferences,
+  getCategoriesForKind,
+  previewBudgetImpact,
+  removeCustomCategory,
+  setCategoryBudget
+} from './preferences';
 import type { LedgerState } from './types';
 
 describe('Mesin Akuntansi Multi-Rekening KasPresisi', () => {
@@ -92,6 +105,91 @@ describe('Mesin Akuntansi Multi-Rekening KasPresisi', () => {
     // Hapus pengeluaran mengembalikan saldo semula
     state = applyDeleteTransaction(state, 'tx_out');
     expect(state.accounts[0].balance).toBe(1_750_000);
+  });
+
+  it('dapat mengedit rekening beserta koreksi saldo dan menyelaraskan nama di riwayat', () => {
+    let state = applyAddAccount(
+      emptyState,
+      {
+        name: 'BCA Lama',
+        type: 'bank',
+        maskedNumber: '1111',
+        roleTag: 'Utama',
+        initialBalance: 1_000_000
+      },
+      'bca'
+    );
+    state = applyAddTransaction(
+      state,
+      {
+        date: '2026-11-26',
+        time: '10:00',
+        kind: 'expense',
+        amount: 100_000,
+        category: 'Konsumsi & Makan',
+        note: 'Kopi',
+        accountId: 'bca'
+      },
+      'tx_1'
+    );
+
+    state = applyUpdateAccount(state, {
+      id: 'bca',
+      name: 'BCA Prioritas',
+      type: 'bank',
+      maskedNumber: '•••• 9999',
+      roleTag: 'Tabungan Utama',
+      balance: 1_250_000
+    });
+
+    expect(state.accounts[0].name).toBe('BCA Prioritas');
+    expect(state.accounts[0].balance).toBe(1_250_000);
+    expect(state.transactions[0].accountName).toBe('BCA Prioritas');
+  });
+
+  it('dapat mengedit transaksi termasuk ubah nominal, jenis, dan pindah rekening dengan saldo akurat', () => {
+    let state = applyAddAccount(
+      emptyState,
+      { name: 'BCA', type: 'bank', maskedNumber: '1', roleTag: 'A', initialBalance: 1_000_000 },
+      'bca'
+    );
+    state = applyAddAccount(
+      state,
+      { name: 'GoPay', type: 'ewallet', maskedNumber: '2', roleTag: 'B', initialBalance: 500_000 },
+      'gopay'
+    );
+
+    state = applyAddTransaction(
+      state,
+      {
+        date: '2026-11-26',
+        time: '12:00',
+        kind: 'expense',
+        amount: 200_000,
+        category: 'Belanja Harian',
+        note: 'Supermarket',
+        accountId: 'bca'
+      },
+      'tx_edit'
+    );
+    expect(state.accounts.find((a) => a.id === 'bca')?.balance).toBe(800_000);
+
+    // Pindahkan transaksi ke GoPay dan ubah nominal menjadi 150.000
+    state = applyUpdateTransaction(state, {
+      id: 'tx_edit',
+      date: '2026-11-27',
+      time: '13:15',
+      kind: 'expense',
+      amount: 150_000,
+      category: 'Konsumsi & Makan',
+      note: 'Makan bersama',
+      accountId: 'gopay'
+    });
+
+    expect(state.accounts.find((a) => a.id === 'bca')?.balance).toBe(1_000_000);
+    expect(state.accounts.find((a) => a.id === 'gopay')?.balance).toBe(350_000);
+    expect(state.transactions[0].accountName).toBe('GoPay');
+    expect(state.transactions[0].note).toBe('Makan bersama');
   });
 
   it('memindahkan saldo antar rekening beserta biaya admin tanpa mengotori pengeluaran laporan harian', () => {
@@ -209,5 +307,118 @@ describe('Mesin Akuntansi Multi-Rekening KasPresisi', () => {
     expect(weekly.totalExpense).toBe(200_000);
     expect(monthly.totalIncome).toBe(1_000_000);
     expect(monthly.totalExpense).toBe(500_000);
+  });
+
+  it('menyaring dan mencari riwayat transaksi berdasarkan kata kunci, kategori, jenis, dan rentang tanggal', () => {
+    let state = applyAddAccount(
+      emptyState,
+      { name: 'BCA', type: 'bank', maskedNumber: '1', roleTag: 'A', initialBalance: 5_000_000 },
+      'bca'
+    );
+    state = applyAddTransaction(state, {
+      date: '2026-11-10',
+      time: '09:00',
+      kind: 'expense',
+      amount: 45_000,
+      category: 'Konsumsi & Makan',
+      note: 'Kopi susu pagi',
+      accountId: 'bca'
+    });
+    state = applyAddTransaction(state, {
+      date: '2026-11-20',
+      time: '15:00',
+      kind: 'income',
+      amount: 2_000_000,
+      category: 'Pendapatan Proyek',
+      note: 'DP Website',
+      accountId: 'bca'
+    });
+
+    const byKeyword = filterTransactions(state.transactions, {
+      query: 'kopi',
+      kind: 'all',
+      category: 'all',
+      accountId: 'all',
+      dateFrom: '',
+      dateTo: ''
+    });
+    expect(byKeyword.items).toHaveLength(1);
+    expect(byKeyword.totalExpense).toBe(45_000);
+
+    const byDateRange = filterTransactions(state.transactions, {
+      query: '',
+      kind: 'income',
+      category: 'all',
+      accountId: 'all',
+      dateFrom: '2026-11-15',
+      dateTo: '2026-11-30'
+    });
+    expect(byDateRange.items).toHaveLength(1);
+    expect(byDateRange.totalIncome).toBe(2_000_000);
+  });
+
+  it('mengelola kategori kustom serta menghitung status dan peringatan batas anggaran bulanan', () => {
+    let prefs = createDefaultPreferences();
+    prefs = addCustomCategory(prefs, 'expense', 'Cicilan Kendaraan');
+    expect(getCategoriesForKind(prefs, 'expense')).toContain('Cicilan Kendaraan');
+
+    prefs = setCategoryBudget(prefs, 'Konsumsi & Makan', 1_000_000);
+    prefs = setCategoryBudget(prefs, 'Cicilan Kendaraan', 500_000);
+
+    let state = applyAddAccount(
+      emptyState,
+      { name: 'BCA', type: 'bank', maskedNumber: '1', roleTag: 'A', initialBalance: 5_000_000 },
+      'bca'
+    );
+    state = applyAddTransaction(state, {
+      date: '2026-11-12',
+      time: '12:00',
+      kind: 'expense',
+      amount: 850_000,
+      category: 'Konsumsi & Makan',
+      note: 'Makan',
+      accountId: 'bca'
+    });
+    state = applyAddTransaction(state, {
+      date: '2026-11-15',
+      time: '14:00',
+      kind: 'expense',
+      amount: 550_000,
+      category: 'Cicilan Kendaraan',
+      note: 'Angsuran',
+      accountId: 'bca'
+    });
+
+    const statuses = computeMonthlyBudgetStatuses(state.transactions, prefs, '2026-11');
+    expect(statuses).toHaveLength(2);
+    expect(statuses[0].category).toBe('Cicilan Kendaraan');
+    expect(statuses[0].status).toBe('exceeded');
+    expect(statuses[1].category).toBe('Konsumsi & Makan');
+    expect(statuses[1].status).toBe('warning');
+
+    const preview = previewBudgetImpact(
+      state.transactions,
+      prefs,
+      'Konsumsi & Makan',
+      '2026-11',
+      200_000
+    );
+    expect(preview?.status).toBe('exceeded');
+    expect(preview?.percent).toBe(105);
+
+    prefs = removeCustomCategory(prefs, 'expense', 'Cicilan Kendaraan');
+    expect(getCategoriesForKind(prefs, 'expense')).not.toContain('Cicilan Kendaraan');
+    expect(prefs.monthlyBudgets['Cicilan Kendaraan']).toBeUndefined();
+  });
+
+  it('membuat dan memverifikasi kunci PIN lokal 4 digit dan 6 digit dengan benar', async () => {
+    const cfg4 = await createPinLockConfig('2580', 4, 1);
+    expect(cfg4.enabled).toBe(true);
+    expect(await verifyLocalPin('2580', cfg4)).toBe(true);
+    expect(await verifyLocalPin('0000', cfg4)).toBe(false);
+
+    const cfg6 = await createPinLockConfig('147258', 6, 0);
+    expect(await verifyLocalPin('147258', cfg6)).toBe(true);
+    expect(await verifyLocalPin('147259', cfg6)).toBe(false);
   });
 });

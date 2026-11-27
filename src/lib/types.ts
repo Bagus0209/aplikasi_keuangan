@@ -82,3 +82,38 @@ export interface LedgerState {
   transactions: Transaction[];
   transfers: Transfer[];
 }
+
+export interface UserPreferences {
+  customExpenseCategories: string[];
+  customIncomeCategories: string[];
+  monthlyBudgets: Record<string, number>;
+  budgetWarningThresholdPct: number;
+}
+
+export type BudgetHealthStatus = 'safe' | 'warning' | 'exceeded';
+
+export interface CategoryBudgetStatus {
+  category: string;
+  limit: number;
+  spent: number;
+  remaining: number;
+  percent: number;
+  status: BudgetHealthStatus;
+}
+
+export interface TransactionSearchFilter {
+  query: string;
+  kind: 'all' | TransactionKind;
+  category: string;
+  accountId: string;
+  dateFrom: string;
+  dateTo: string;
+}
+
+export interface PinLockConfig {
+  enabled: boolean;
+  pinHash: string;
+  salt: string;
+  pinLength: 4 | 6;
+  autoLockMinutes: number; // 0 = saat buka aplikasi saja, >0 = kunci setelah background N menit
+}

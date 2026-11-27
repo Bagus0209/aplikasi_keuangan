@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BudgetCategoryModal } from './components/BudgetCategoryModal';
+import { EditTransactionModal } from './components/EditTransactionModal';
 import {
   IconChart,
+  IconLock,
   IconReceiptAdd,
   IconReport,
   IconSheet,
@@ -8,6 +11,7 @@ import {
   IconWallet
 } from './components/Icons';
 import { InstallPwaBanner } from './components/InstallPwaBanner';
+import { PinLockScreen } from './components/PinLockScreen';
 import { ReceiptLightboxModal } from './components/ReceiptLightboxModal';
 import { SettingsSheetModal } from './components/SettingsSheetModal';
 import {
@@ -17,21 +21,45 @@ import {
   pushActionToGoogleSheet,
   saveLocalLedger,
   saveSyncConfig,
-  syncFromGoogleSheet
+  syncFromGoogleSheet,
+  syncPreferencesToGoogleSheet
 } from './lib/api';
-import { getNowTime } from './lib/format';
+import { getNowTime, getTodayIso } from './lib/format';
 import {
   applyAddAccount,
   applyAddTransaction,
   applyAddTransfer,
   applyDeleteAccount,
   applyDeleteTransaction,
+  applyUpdateAccount,
+  applyUpdateTransaction,
   createSimulationDataset,
   type NewAccountInput,
   type NewTransactionInput,
-  type NewTransferInput
+  type NewTransferInput,
+  type UpdateAccountInput,
+  type UpdateTransactionInput
 } from './lib/ledger';
-import type { ActiveTab, LedgerState, SyncConfig } from './lib/types';
+import {
+  clearPinLockConfig,
+  loadPinLockConfig,
+  savePinLockConfig
+} from './lib/pinLock';
+import {
+  addCustomCategory,
+  computeMonthlyBudgetStatuses,
+  loadUserPreferences,
+  saveUserPreferences
+} from './lib/preferences';
+import type {
+  ActiveTab,
+  LedgerState,
+  PinLockConfig,
+  SyncConfig,
+  Transaction,
+  TransactionKind,
+  UserPreferences
+} from './lib/types';
 import { AccountsView } from './views/AccountsView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { DailyReportView } from './views/DailyReportView';
@@ -42,10 +70,17 @@ export function App(): React.ReactElement {
   const [activeTab, setActiveTab] = useState<ActiveTab>('accounts');
   const [ledger, setLedger] = useState<LedgerState>(() => loadLocalLedger());
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(() => loadSyncConfig());
+  const [preferences, setPreferences] = useState<UserPreferences>(() => loadUserPreferences());
+  const [pinConfig, setPinConfig] = useState<PinLockConfig>(() => loadPinLockConfig());
+  const [isLocked, setIsLocked] = useState<boolean>(() => loadPinLockConfig().enabled);
 
   const [preselectedAccountId, setPreselectedAccountId] = useState<string | undefined>();
   const [preselectedTransferFromId, setPreselectedTransferFromId] = useState<string | undefined>();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [budgetModalSection, setBudgetModalSection] = useState<'budgets' | 'categories' | null>(
+    null
+  );
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
@@ -54,9 +89,38 @@ export function App(): React.ReactElement {
     null
   );
 
+  const hiddenSinceRef = useRef<number | null>(null);
+
   useEffect(() => {
     saveLocalLedger(ledger);
   }, [ledger]);
+
+  useEffect(() => {
+    saveUserPreferences(preferences);
+  }, [preferences]);
+
+  // Auto-lock ketika aplikasi kembali dari background sesuai autoLockMinutes
+  useEffect(() => {
+    if (!pinConfig.enabled || pinConfig.autoLockMinutes <= 0) return;
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenSinceRef.current = Date.now();
+      } else if (document.visibilityState === 'visible' && hiddenSinceRef.current !== null) {
+        const elapsedMs = Date.now() - hiddenSinceRef.current;
+        hiddenSinceRef.current = null;
+        if (elapsedMs >= pinConfig.autoLockMinutes * 60_000) {
+          setIsLocked(true);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [pinConfig.enabled, pinConfig.autoLockMinutes]);
+
+  const showTempNotice = useCallback((text: string) => {
+    setBannerNotice(text);
+    window.setTimeout(() => setBannerNotice(null), 3500);
+  }, []);
 
   const performCloudSync = useCallback(async (cfg: SyncConfig) => {
     if (!isCloudConfigured(cfg)) return;
@@ -65,6 +129,9 @@ export function App(): React.ReactElement {
     try {
       const result = await syncFromGoogleSheet(cfg);
       setLedger(result.ledger);
+      if (result.preferences) {
+        setPreferences(result.preferences);
+      }
       const updatedCfg: SyncConfig = {
         ...cfg,
         spreadsheetName: result.spreadsheetName || cfg.spreadsheetName,
@@ -94,6 +161,9 @@ export function App(): React.ReactElement {
     try {
       const result = await syncFromGoogleSheet(nextCfg);
       setLedger(result.ledger);
+      if (result.preferences) {
+        setPreferences(result.preferences);
+      }
       const saved: SyncConfig = {
         ...nextCfg,
         spreadsheetName: result.spreadsheetName,
@@ -103,8 +173,7 @@ export function App(): React.ReactElement {
       setSyncConfig(saved);
       saveSyncConfig(saved);
       setIsSettingsOpen(false);
-      setBannerNotice(`Tersambung ke Google Sheet: ${result.spreadsheetName || 'Aktif'}`);
-      setTimeout(() => setBannerNotice(null), 3500);
+      showTempNotice(`Tersambung ke Google Sheet: ${result.spreadsheetName || 'Aktif'}`);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Koneksi gagal.');
     } finally {
@@ -118,6 +187,37 @@ export function App(): React.ReactElement {
     saveSyncConfig(emptyCfg);
     setSyncError(null);
     setIsSettingsOpen(false);
+  };
+
+  const handlePreferencesChange = (nextPrefs: UserPreferences) => {
+    setPreferences(nextPrefs);
+    if (isCloudConfigured(syncConfig)) {
+      void syncPreferencesToGoogleSheet(syncConfig, nextPrefs);
+    }
+  };
+
+  const handleAddCustomCategory = (kind: TransactionKind, name: string) => {
+    const nextPrefs = addCustomCategory(preferences, kind, name);
+    handlePreferencesChange(nextPrefs);
+  };
+
+  const handleUpdatePinConfig = (nextPin: PinLockConfig) => {
+    setPinConfig(nextPin);
+    savePinLockConfig(nextPin);
+  };
+
+  const handleDisablePin = () => {
+    const cleared = clearPinLockConfig();
+    setPinConfig(cleared);
+    setIsLocked(false);
+  };
+
+  const handleResetPinAndClearLocal = () => {
+    const cleared = clearPinLockConfig();
+    setPinConfig(cleared);
+    setLedger({ accounts: [], transactions: [], transfers: [] });
+    setIsLocked(false);
+    showTempNotice('PIN lokal direset dan data lokal di perangkat telah dikosongkan.');
   };
 
   const handleAddAccount = async (input: NewAccountInput) => {
@@ -135,6 +235,24 @@ export function App(): React.ReactElement {
       }
     } else {
       setLedger((prev) => applyAddAccount(prev, input, id));
+    }
+  };
+
+  const handleUpdateAccount = async (input: UpdateAccountInput) => {
+    if (isCloudConfigured(syncConfig)) {
+      setIsBusy(true);
+      try {
+        const remote = await pushActionToGoogleSheet(syncConfig, 'updateAccount', {
+          ...input
+        });
+        setLedger(remote);
+        showTempNotice(`Rekening "${input.name}" berhasil diperbarui.`);
+      } finally {
+        setIsBusy(false);
+      }
+    } else {
+      setLedger((prev) => applyUpdateAccount(prev, input));
+      showTempNotice(`Rekening "${input.name}" berhasil diperbarui.`);
     }
   };
 
@@ -183,6 +301,24 @@ export function App(): React.ReactElement {
     }
   };
 
+  const handleUpdateTransaction = async (input: UpdateTransactionInput) => {
+    if (isCloudConfigured(syncConfig)) {
+      setIsBusy(true);
+      try {
+        const remote = await pushActionToGoogleSheet(syncConfig, 'updateTransaction', {
+          ...input
+        });
+        setLedger(remote);
+        showTempNotice('Perubahan transaksi tersimpan dan saldo rekening diperbarui.');
+      } finally {
+        setIsBusy(false);
+      }
+    } else {
+      setLedger((prev) => applyUpdateTransaction(prev, input));
+      showTempNotice('Perubahan transaksi tersimpan dan saldo rekening diperbarui.');
+    }
+  };
+
   const handleDeleteTransaction = async (txId: string) => {
     if (isCloudConfigured(syncConfig)) {
       setIsBusy(true);
@@ -220,6 +356,13 @@ export function App(): React.ReactElement {
   const cloudActive = isCloudConfigured(syncConfig);
   const hasSimulationData = ledger.accounts.some((a) => a.isSimulation);
 
+  const currentMonthPrefix = getTodayIso().slice(0, 7);
+  const budgetAlerts = computeMonthlyBudgetStatuses(
+    ledger.transactions,
+    preferences,
+    currentMonthPrefix
+  ).filter((item) => item.status !== 'safe');
+
   const navItems: Array<{
     key: ActiveTab;
     label: string;
@@ -231,6 +374,16 @@ export function App(): React.ReactElement {
     { key: 'transfer', label: 'Transfer', icon: <IconTransfer className="w-4 h-4" /> },
     { key: 'report', label: 'Laporan', icon: <IconReport className="w-4 h-4" /> }
   ];
+
+  if (isLocked && pinConfig.enabled) {
+    return (
+      <PinLockScreen
+        config={pinConfig}
+        onUnlock={() => setIsLocked(false)}
+        onResetPinAndClearLocal={handleResetPinAndClearLocal}
+      />
+    );
+  }
 
   return (
     <div className="min-h-dvh w-full flex justify-center bg-[#FAFAFB] md:bg-[#E4E9F0]">
@@ -259,6 +412,16 @@ export function App(): React.ReactElement {
           </div>
 
           <div className="flex items-center gap-1.5">
+            {pinConfig.enabled && (
+              <button
+                type="button"
+                onClick={() => setIsLocked(true)}
+                aria-label="Kunci aplikasi sekarang"
+                className="inline-flex min-h-[44px] min-w-[40px] items-center justify-center rounded-xl border border-[#DCE2EC] bg-[#F8FAFC] text-[#0B1220] hover:bg-[#E2E8F0]"
+              >
+                <IconLock className="w-4 h-4" />
+              </button>
+            )}
             {cloudActive && (
               <button
                 type="button"
@@ -318,8 +481,10 @@ export function App(): React.ReactElement {
             <AccountsView
               accounts={ledger.accounts}
               transactions={ledger.transactions}
+              budgetAlerts={budgetAlerts}
               isBusy={isBusy}
               onAddAccount={handleAddAccount}
+              onUpdateAccount={handleUpdateAccount}
               onDeleteAccount={handleDeleteAccount}
               onQuickRecordForAccount={(accId) => {
                 setPreselectedAccountId(accId);
@@ -330,6 +495,7 @@ export function App(): React.ReactElement {
                 setActiveTab('transfer');
               }}
               onOpenReport={() => setActiveTab('report')}
+              onOpenBudgets={() => setActiveTab('analytics')}
               onLoadSimulation={() => setLedger(createSimulationDataset())}
               onOpenSettings={() => setIsSettingsOpen(true)}
             />
@@ -338,9 +504,13 @@ export function App(): React.ReactElement {
           {activeTab === 'record' && (
             <RecordTransactionView
               accounts={ledger.accounts}
+              transactions={ledger.transactions}
+              preferences={preferences}
               preselectedAccountId={preselectedAccountId}
               isBusy={isBusy}
               onSaveTransaction={handleSaveTransaction}
+              onAddCustomCategory={handleAddCustomCategory}
+              onOpenBudgetManager={() => setBudgetModalSection('budgets')}
               onGoToAddAccount={() => setActiveTab('accounts')}
               onPreviewReceipt={(url, caption) => setLightboxImage({ url, caption })}
             />
@@ -350,8 +520,11 @@ export function App(): React.ReactElement {
             <AnalyticsView
               accounts={ledger.accounts}
               transactions={ledger.transactions}
+              preferences={preferences}
               isBusy={isBusy}
+              onEditTransaction={(tx) => setEditingTx(tx)}
               onDeleteTransaction={handleDeleteTransaction}
+              onOpenBudgetModal={(section) => setBudgetModalSection(section)}
               onPreviewReceipt={(url, caption) => setLightboxImage({ url, caption })}
               onGoToRecord={() => setActiveTab('record')}
             />
@@ -371,6 +544,7 @@ export function App(): React.ReactElement {
           {activeTab === 'report' && (
             <DailyReportView
               ledger={ledger}
+              onEditTransaction={(tx) => setEditingTx(tx)}
               onPreviewReceipt={(url, caption) => setLightboxImage({ url, caption })}
               onGoToRecord={() => setActiveTab('record')}
             />
@@ -408,12 +582,16 @@ export function App(): React.ReactElement {
         <SettingsSheetModal
           isOpen={isSettingsOpen}
           config={syncConfig}
+          pinConfig={pinConfig}
           isSyncing={isBusy}
           syncError={syncError}
           hasSimulationData={hasSimulationData}
           onClose={() => setIsSettingsOpen(false)}
           onSaveAndSync={handleSaveAndSyncConfig}
           onDisconnect={handleDisconnectCloud}
+          onUpdatePinConfig={handleUpdatePinConfig}
+          onDisablePin={handleDisablePin}
+          onOpenBudgetManager={() => setBudgetModalSection('budgets')}
           onLoadSimulation={() => {
             setLedger(createSimulationDataset());
             setIsSettingsOpen(false);
@@ -422,6 +600,24 @@ export function App(): React.ReactElement {
             setLedger({ accounts: [], transactions: [], transfers: [] });
             setIsSettingsOpen(false);
           }}
+        />
+
+        <EditTransactionModal
+          transaction={editingTx}
+          accounts={ledger.accounts}
+          allTransactions={ledger.transactions}
+          preferences={preferences}
+          isBusy={isBusy}
+          onClose={() => setEditingTx(null)}
+          onSave={handleUpdateTransaction}
+        />
+
+        <BudgetCategoryModal
+          isOpen={budgetModalSection !== null}
+          preferences={preferences}
+          initialSection={budgetModalSection || 'budgets'}
+          onClose={() => setBudgetModalSection(null)}
+          onChangePreferences={handlePreferencesChange}
         />
 
         <ReceiptLightboxModal
